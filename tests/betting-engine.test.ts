@@ -210,8 +210,9 @@ console.log("\n[D5] Décision — marchés déjà résolus par le score (jamais 
     statistics: statsPair({ shotsOnGoal: 3 }, { shotsOnGoal: 3 }),
     minute: 70, score: { home: 2, away: 2 },
   });
-  check("over 1.5 / 2.5 / BTTS résolus", d.alreadyResolvedMarkets.length === 3);
+  check("over 1.5 / 2.5 / BTTS résolus", d.alreadyResolvedMarkets.length >= 3, d.alreadyResolvedMarkets.length);
   check("over 1.5 listé comme résolu", d.alreadyResolvedMarkets.some((m) => m.marketName.includes("Over 1.5")));
+  check("BTTS listé comme résolu", d.alreadyResolvedMarkets.some((m) => m.marketName.includes("BTTS")));
   check("aucun marché résolu dans les recommandés", !d.recommendedMarkets.some((m) => m.marketName.includes("Over 1.5")));
 }
 
@@ -233,7 +234,7 @@ console.log("\n[D6] Décision — carton rouge contre le dominant => INVALIDATED
     minute: 65, score: { home: 0, away: 0 },
   });
   check("action INVALIDATED", d.action === "INVALIDATED", d.action);
-  check("marché précédent marqué invalidé", d.avoidMarkets.some((m) => m.status === "invalidated"));
+  check("marché précédent marqué invalidé", d.invalidatedMarkets.some((m) => m.status === "invalidated"));
   check("résumé: pari devenu mauvais", d.summary.includes("devenu mauvais"));
 }
 

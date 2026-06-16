@@ -95,6 +95,8 @@ export interface BotConfig {
   enableTelegram: boolean;
   enableApiMonitor: boolean;
   statePath: string;
+  /** Style des alertes live : "compact" (court, par défaut) ou "full" (long). */
+  liveAlertStyle: "compact" | "full";
 
   // Capteurs multi-sources
   commentary: ScraperConfig;
@@ -175,6 +177,7 @@ export function getBotConfig(): BotConfig {
     enableTelegram: bool(process.env.ENABLE_TELEGRAM_ALERTS, true),
     enableApiMonitor: bool(process.env.ENABLE_API_FOOTBALL_MONITOR, true),
     statePath: process.env.STATE_PATH || "data/state.json",
+    liveAlertStyle: (process.env.LIVE_ALERT_STYLE ?? "compact").toLowerCase() === "full" ? "full" : "compact",
     commentary,
     market,
     lineup,

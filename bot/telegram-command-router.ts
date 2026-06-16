@@ -31,11 +31,18 @@ import {
 import { runForcedLiveAnalysis, runLiveBettingDecision } from "./commands";
 import { composeWeatherReport, fetchWeather, getWeatherConfig } from "./weather-service";
 import { formatWatchStarted, startWatchForMatch, stopWatchByFixture } from "./watch-manager";
-import { winamaxButton, winamaxSearchButton, type InlineButton } from "./bookmaker-links";
+import { winamaxButton, type InlineButton } from "./bookmaker-links";
 import { buildAnalysisParts } from "./analysis-splitter";
 import { sourceHealth } from "./scrapers/source-health";
 import { buildOddsStatus, isLiveOddsExploitable, renderOddsStatusLines } from "./odds/odds-status";
 import type { NormalizedOddsBoard } from "./odds/odds-normalizer";
+import {
+  getMatchLifecycleStatus,
+  getNextActionableMatches,
+  isFinished,
+  type ActionableMatches,
+} from "./match-lifecycle";
+import { composeMatchStory, composePostMatchSummary } from "./postmatch-analysis";
 
 export interface RouterCtx {
   config: BotConfig;
@@ -58,6 +65,8 @@ export interface RouterDeps {
   forcedLive: (state: BotState, fixtureId: number) => Promise<string>;
   overview: () => Promise<{ today: NormalizedFixture[]; tomorrow: NormalizedFixture[]; live: NormalizedFixture[] }>;
   matchById: (fixtureId: number) => Promise<ResolvedMatch | null>;
+  nextMatches: () => Promise<ActionableMatches>;
+  fixtureById: (fixtureId: number) => Promise<NormalizedFixture | null>;
 }
 
 export function defaultRouterDeps(): RouterDeps {
@@ -83,6 +92,14 @@ export function defaultRouterDeps(): RouterDeps {
       if (f) return toResolved(f, "high");
       const af = await getFixtureById(id).catch(() => null);
       return af ? toResolved(normalizeFixture(af), "high") : null;
+    },
+    nextMatches: () => getNextActionableMatches(),
+    fixtureById: async (id) => {
+      const all = await getWorldCupFixturesCached().catch(() => []);
+      const f = all.find((x) => x.fixtureId === id);
+      if (f) return f;
+      const af = await getFixtureById(id).catch(() => null);
+      return af ? normalizeFixture(af) : null;
     },
   };
 }
@@ -153,13 +170,16 @@ function helpText(): string {
     "/brief france senegal     — résumé très court",
     "/weather france senegal   — météo du match",
     "/bet_live france senegal  — décision de paris live (action)",
-    "/watch france senegal     — surveillance live",
-    "/analyse demain           — matchs de demain (boutons)",
-    "/today  /tomorrow  /matches — programme",
-    "/analyse_live france senegal — analyse live immédiate",
+    "/watch france senegal     — surveillance live (alertes compactes)",
+    "/match_story france senegal — récit du match depuis le watch",
+    "/postmatch france senegal — résumé post-match",
+    "/next  /next_analysis  /watch_next — prochain match",
+    "/live_radar               — classe les matchs du jour (🔥/🟡/✅)",
+    "/today  /tomorrow  /matches — programme (terminés/live/à venir)",
+    "/analyse_live france senegal — analyse live immédiate (/…_full = long)",
     "/context france senegal   — contexte + plan live",
     "/stop france senegal      — arrête une surveillance",
-    "/status  /last  /sources  /help",
+    "/status  /last  /last_full  /sources  /help",
     "",
     "Astuce : fonctionne aussi avec un fixtureId, « France - Sénégal », « argentine algerie », etc.",
     "⚠️ Analyse informative. Aucune issue garantie. Réservé aux majeurs. Jouez responsable.",
@@ -179,6 +199,15 @@ async function analyseFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Prom
 
   if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
     const m = res.match;
+    // Match terminé : ne pas faire comme s'il était à venir → résumé post-match.
+    if (m.status === "finished") {
+      const fixture = await deps.fixtureById(m.fixtureId);
+      const memory = ctx.state.get(m.fixtureId)?.memory ?? null;
+      await ctx.send(`✅ ${m.homeTeam} vs ${m.awayTeam} est terminé — voici un résumé post-match (ou /postmatch ${m.homeTeam} ${m.awayTeam}).`);
+      if (fixture) await ctx.send(composePostMatchSummary(fixture, memory, null));
+      await sendNextProposals(ctx, deps, "Prochains matchs à analyser :");
+      return;
+    }
     await ctx.send(`⏳ Analyse complète — ${m.homeTeam} vs ${m.awayTeam} (#${m.fixtureId})…`);
     const text = await deps.preMatch(m.fixtureId);
     await deliverAnalysis(ctx, text, analysisButtons(m.fixtureId));
@@ -256,6 +285,11 @@ async function betLiveFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Prom
   if (!query) return void (await ctx.send("Usage : /bet_live <équipe1> <équipe2>  (décision de paris live)"));
   const res = await deps.resolve(query);
   if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    if (res.match.status === "finished") {
+      await ctx.send(`Match terminé — pas de signal live (${res.match.homeTeam} vs ${res.match.awayTeam}). Essaie /postmatch ${res.match.homeTeam} ${res.match.awayTeam}.`);
+      await sendNextProposals(ctx, deps, "Prochains matchs :");
+      return;
+    }
     await ctx.send(`⏳ Signal live — ${res.match.homeTeam} vs ${res.match.awayTeam}…`);
     const text = await deps.betLive(ctx.state, res.match.fixtureId);
     await ctx.send(text, [[{ text: "🔴 Surveiller", callback_data: `w:${res.match.fixtureId}` }, winamaxButton(res.match.fixtureId)]]);
@@ -301,6 +335,11 @@ async function watchFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promis
   const res = await deps.resolve(query);
   ctx.log?.(`[RESOLVER] input="${query}" resolved=${res.ok} kind=${res.kind} fixtureId=${res.match?.fixtureId ?? "-"}`);
   if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    if (res.match.status === "finished") {
+      await ctx.send(`Match terminé — surveillance live impossible (${res.match.homeTeam} vs ${res.match.awayTeam}).`);
+      await sendNextProposals(ctx, deps, "Prochains matchs à surveiller :");
+      return;
+    }
     await startWatchForFixture(ctx, deps, res.match);
     return;
   }
@@ -344,9 +383,25 @@ async function stopFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise
 
 async function listFlow(ctx: RouterCtx, deps: RouterDeps, which: "today" | "tomorrow"): Promise<void> {
   const ov = await deps.overview();
-  const list = (which === "today" ? ov.today : ov.tomorrow).map((f) => toResolved(f, "high"));
-  const title = which === "today" ? "📅 Matchs Coupe du monde — aujourd'hui" : "📅 Matchs Coupe du monde — demain";
-  await sendMatchList(ctx, title, list);
+  if (which === "tomorrow") {
+    await sendMatchList(ctx, "📅 Matchs Coupe du monde — demain", ov.tomorrow.map((f) => toResolved(f, "high")));
+    return;
+  }
+  // /today : séparation claire Terminés / Live / À venir.
+  const today = ov.today;
+  const finished = today.filter((f) => isFinished(f));
+  const live = today.filter((f) => getMatchLifecycleStatus(f) === "live" || getMatchLifecycleStatus(f) === "halftime");
+  const upcoming = today.filter((f) => getMatchLifecycleStatus(f) === "not_started");
+  if (today.length === 0 && ov.live.length === 0) {
+    await ctx.send("📅 Aucun match Coupe du monde aujourd'hui. Essaie /tomorrow ou /next.");
+    return;
+  }
+  const L: string[] = ["📅 Matchs Coupe du monde — aujourd'hui"];
+  if (finished.length) L.push("", "✅ Terminés", ...finished.map((f) => `- ${f.home.name} ${f.homeGoals ?? 0}-${f.awayGoals ?? 0} ${f.away.name}`));
+  if (live.length) L.push("", "🔴 Live", ...live.map((f) => `- ${f.home.name} ${f.homeGoals ?? 0}-${f.awayGoals ?? 0} ${f.away.name} (${f.elapsed ?? 0}e)`));
+  if (upcoming.length) L.push("", "⏳ À venir", ...upcoming.map((f) => `- ${f.home.name} vs ${f.away.name} — ${formatKickoff(f.kickoffAt)}`));
+  const buttons = [...live, ...upcoming].slice(0, 12).map((f) => matchActionRow(toResolved(f, "high")));
+  await ctx.send(L.join("\n"), buttons.length ? buttons : undefined);
 }
 
 async function matchesFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
@@ -360,6 +415,109 @@ async function matchesFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
   lines.push("", "Demain :", ...(tomorrow.length ? tomorrow.map((m) => matchLine(m)) : ["(aucun)"]));
   const buttons = [...live, ...today, ...tomorrow].slice(0, 12).map((m) => matchActionRow(m));
   await ctx.send(lines.join("\n"), buttons.length ? buttons : undefined);
+}
+
+/* ----------------------------- Calendrier / cycle de vie ----------------------------- */
+
+function nextMatchRows(matches: NormalizedFixture[]): InlineButton[][] {
+  return matches.slice(0, 3).map((f) => [
+    { text: `📊 Analyser ${f.home.name}-${f.away.name}`, callback_data: `a:${f.fixtureId}` },
+    { text: "🔴 Surveiller", callback_data: `w:${f.fixtureId}` },
+    winamaxButton(f.fixtureId),
+  ]);
+}
+
+async function sendNextProposals(ctx: RouterCtx, deps: RouterDeps, intro: string): Promise<void> {
+  const nm = await deps.nextMatches();
+  const candidates = [...nm.live, ...nm.upcoming];
+  if (candidates.length === 0) {
+    await ctx.send(`${intro}\n\nAucun prochain match Coupe du monde trouvé.`);
+    return;
+  }
+  const body = [intro, "", ...candidates.slice(0, 5).map((f, i) => matchLine(toResolved(f, "high"), i + 1))].join("\n");
+  await ctx.send(body, nextMatchRows(candidates));
+}
+
+async function nextFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
+  const nm = await deps.nextMatches();
+  if (!nm.nextMatch) return void (await ctx.send("Aucun prochain match Coupe du monde non terminé."));
+  const m = toResolved(nm.nextMatch, "high");
+  await ctx.send(`⏭ Prochain match : ${matchLine(m)}`, [matchActionRow(m)]);
+}
+
+async function nextAnalysisFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
+  const nm = await deps.nextMatches();
+  if (!nm.nextMatch) return void (await ctx.send("Aucun prochain match à analyser."));
+  const m = toResolved(nm.nextMatch, "high");
+  await ctx.send(`⏳ Analyse du prochain match — ${m.homeTeam} vs ${m.awayTeam}…`);
+  const text = await deps.preMatch(m.fixtureId);
+  await deliverAnalysis(ctx, text, analysisButtons(m.fixtureId));
+}
+
+async function watchNextFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
+  const nm = await deps.nextMatches();
+  if (!nm.nextMatch) return void (await ctx.send("Aucun prochain match à surveiller."));
+  await startWatchForFixture(ctx, deps, toResolved(nm.nextMatch, "high"));
+}
+
+async function liveRadarFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
+  const ov = await deps.overview();
+  const live = ov.live;
+  const finished = ov.today.filter((f) => isFinished(f));
+  const upcoming = ov.today.filter((f) => getMatchLifecycleStatus(f) === "not_started");
+  const hot = live.filter((f) => (f.homeGoals ?? 0) + (f.awayGoals ?? 0) > 0 || (f.elapsed ?? 0) >= 60);
+  const warmLive = live.filter((f) => !hot.includes(f));
+  const L: string[] = ["📡 Live radar — Coupe du monde (aujourd'hui)"];
+  const block = (title: string, arr: NormalizedFixture[]) => {
+    if (arr.length) L.push("", title, ...arr.map((f) => matchLine(toResolved(f, "high"))));
+  };
+  block("🔥 Matchs chauds :", hot);
+  block("🟡 À surveiller :", [...warmLive, ...upcoming.slice(0, 4)]);
+  block("✅ Terminés :", finished);
+  if (live.length + upcoming.length + finished.length === 0) L.push("", "(aucun match aujourd'hui)");
+  const buttons = [...hot, ...warmLive, ...upcoming].slice(0, 12).map((f) => matchActionRow(toResolved(f, "high")));
+  await ctx.send(L.join("\n"), buttons.length ? buttons : undefined);
+}
+
+async function matchStoryFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /match_story <équipe1> <équipe2>"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const w = ctx.state.get(res.match.fixtureId);
+    const fixture = w?.lastFixture ?? (await deps.fixtureById(res.match.fixtureId));
+    if (!fixture) return void (await ctx.send("Match introuvable."));
+    const nowReading = w?.lastAction ? `dernière lecture du bot : ${w.lastAction}` : null;
+    await ctx.send(composeMatchStory(fixture, w?.memory ?? null, nowReading));
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
+}
+
+async function postMatchFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /postmatch <équipe1> <équipe2>"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const fixture = await deps.fixtureById(res.match.fixtureId);
+    if (!fixture) return void (await ctx.send("Match introuvable."));
+    const memory = ctx.state.get(res.match.fixtureId)?.memory ?? null;
+    const buttons = nextMatchRows([...(await deps.nextMatches()).live, ...(await deps.nextMatches()).upcoming]);
+    await ctx.send(composePostMatchSummary(fixture, memory, null), buttons.length ? buttons : undefined);
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
+}
+
+async function lastFullFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
+  const watches = [...ctx.state.watches.values()].filter((w) => w.lastFixture);
+  if (watches.length === 0) return void (await ctx.send("Aucun match suivi. Lance /watch puis /last_full."));
+  watches.sort((a, b) => b.lastApiPollAt - a.lastApiPollAt);
+  const w = watches[0];
+  const text = await deps.forcedLive(ctx.state, w.fixtureId);
+  await ctx.send(text, [[{ text: "🔴 Surveiller", callback_data: `w:${w.fixtureId}` }, winamaxButton(w.fixtureId)]]);
 }
 
 /** Board de cotes le plus récent parmi les surveillances (pour /status, /sources). */
@@ -469,6 +627,22 @@ export async function routeCommand(rawText: string, ctx: RouterCtx, deps = defau
         return void (await betLiveFlow(ctx, deps, rest));
       case "/analyse_live":
         return void (await liveFlow(ctx, deps, rest));
+      case "/analyse_live_full":
+        return void (await liveFlow(ctx, deps, rest));
+      case "/last_full":
+        return void (await lastFullFlow(ctx, deps));
+      case "/next":
+        return void (await nextFlow(ctx, deps));
+      case "/next_analysis":
+        return void (await nextAnalysisFlow(ctx, deps));
+      case "/watch_next":
+        return void (await watchNextFlow(ctx, deps));
+      case "/live_radar":
+        return void (await liveRadarFlow(ctx, deps));
+      case "/match_story":
+        return void (await matchStoryFlow(ctx, deps, rest));
+      case "/postmatch":
+        return void (await postMatchFlow(ctx, deps, rest));
       case "/context":
         return void (await contextFlow(ctx, deps, rest));
       case "/watch":

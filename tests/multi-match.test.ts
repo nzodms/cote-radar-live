@@ -125,6 +125,8 @@ async function run(): Promise<void> {
       forcedLive: async (_s, id) => `LIVE:${id}`,
       overview: async () => ({ today: FIXTURES.filter((f) => f.kickoffAt.startsWith(TODAY)), tomorrow: FIXTURES.filter((f) => f.kickoffAt.startsWith(TOMORROW)), live: [] }),
       matchById: async (id) => { const f = FIXTURES.find((x) => x.fixtureId === id); return f ? toResolved(f, "high") : null; },
+      nextMatches: async () => ({ finished: [], live: [], upcoming: FIXTURES, nextMatch: FIXTURES[0] ?? null }),
+      fixtureById: async (id) => FIXTURES.find((x) => x.fixtureId === id) ?? null,
     };
     const ctx = { config, state, send: async (text: string, buttons?: unknown) => void sent.push({ text, buttons }) };
 

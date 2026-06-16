@@ -139,7 +139,7 @@ async function runCommands(): Promise<void> {
   const config: BotConfig = {
     apiKey: "x", telegramToken: null, telegramBotLink: null, telegramChatId: null, defaultFixtureId: 1489378, matchLabel: "Iran vs NZ",
     apiPollSeconds: 30, maxApiCallsPerDay: 7500, immediateAnalysisCooldownSeconds: 10, minSecondsBetweenSimilarAlerts: 120,
-    nodeEnv: "test", envFileLoaded: false, enableTelegram: true, enableApiMonitor: true, statePath: "data/state.json",
+    nodeEnv: "test", envFileLoaded: false, enableTelegram: true, enableApiMonitor: true, statePath: "data/state.json", liveAlertStyle: "compact",
     commentary: scraper(true, 5), market: scraper(true, 10), lineup: scraper(true, 300),
     news: { enabled: true, urls: [], pollSeconds: 900 }, altStats: scraper(false, 30),
     weather: { enabled: false, apiKeyConfigured: false, location: null },

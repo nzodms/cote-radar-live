@@ -27,9 +27,16 @@ import { compareOdds } from "./odds/odds-snapshot";
 import { fuseSignals, type FusionResult } from "./fusion-engine";
 import { formatLiveAlert } from "./format";
 import { applyPersisted, buildPersisted, loadPersisted, savePersisted } from "./persistence";
+import { generateLiveBettingDecision } from "./live-betting-decision-engine";
+import { formatCompactLiveAlert } from "./compact-live-alert";
+import { composePostMatchSummary } from "./postmatch-analysis";
+import { getNextActionableMatches, isFinished } from "./match-lifecycle";
+import { recordAdvice, recordAlert, recordGoal, recordScore, updateMarketMemory } from "./match-memory";
+import { favoriteSideFromForm } from "./live-pressure";
+import { winamaxButton, type InlineButton } from "./bookmaker-links";
 import { getAccountStatus } from "@/lib/api-football";
 import type { LiveBettingAdvice } from "@/types/live-advice";
-import type { NormalizedFixture } from "@/types/match";
+import type { NormalizedFixture, NormalizedStatsPair, NormalizedTeamStats } from "@/types/match";
 import type { FusionApiSnapshot } from "./scraper-types";
 import type { LiveAlert } from "./types";
 
@@ -95,6 +102,51 @@ function fusionSummary(f: FusionResult): { sources: string[]; contradictions: st
   return { sources, contradictions: f.contradictions, confidence: f.confidence };
 }
 
+function emptyStats(): NormalizedStatsPair {
+  const z: NormalizedTeamStats = {
+    shotsOnGoal: null, shotsOffGoal: null, totalShots: null, blockedShots: null,
+    shotsInsideBox: null, shotsOutsideBox: null, fouls: null, cornerKicks: null,
+    offsides: null, ballPossession: null, yellowCards: null, redCards: null,
+    goalkeeperSaves: null, totalPasses: null, passesAccurate: null, passesPercent: null,
+  };
+  return { home: { ...z }, away: { ...z }, hasData: false };
+}
+
+/** Construit la décision live (moteur orienté action) pour les alertes compactes. */
+function buildLiveDecision(w: WatchState, fixture: NormalizedFixture, advice: LiveBettingAdvice, alert?: LiveAlert) {
+  return generateLiveBettingDecision({
+    fixture,
+    statistics: w.lastStatistics ?? emptyStats(),
+    oddsSnapshot: w.sensors.lastOddsComparison ?? null,
+    previousAdvice: advice,
+    minute: fixture.elapsed,
+    score: { home: fixture.homeGoals ?? 0, away: fixture.awayGoals ?? 0 },
+    favoriteSide: favoriteSideFromForm(w.recentForm),
+    lineupsConfirmed: w.lineups.length > 0,
+    event: alert
+      ? { isGoal: /goal|score/i.test(alert.kind), isRedCard: /red/i.test(alert.kind), side: null, label: alert.whatHappened }
+      : null,
+    matchMemory: w.memory,
+  });
+}
+
+function buildCompactAlert(w: WatchState, fixture: NormalizedFixture, advice: LiveBettingAdvice, alert: LiveAlert): string {
+  const decision = buildLiveDecision(w, fixture, advice, alert);
+  updateMarketMemory(w.memory, {
+    watch: decision.recommendedMarkets.map((m) => m.marketName),
+    resolved: decision.alreadyResolvedMarkets.map((m) => m.marketName),
+    avoid: decision.avoidMarkets.map((m) => m.marketName),
+    invalidated: decision.invalidatedMarkets.map((m) => m.marketName),
+  });
+  return formatCompactLiveAlert({
+    match: fixture,
+    event: { label: alert.whatHappened, isGoal: /goal|score|but/i.test(alert.kind), isRedCard: /red/i.test(alert.kind) },
+    liveDecision: decision,
+    matchMemory: w.memory,
+    oddsSnapshot: w.sensors.lastOddsComparison ?? undefined,
+  });
+}
+
 async function dispatch(
   w: WatchState,
   fixture: NormalizedFixture,
@@ -110,14 +162,18 @@ async function dispatch(
       continue;
     }
     w.gate.markSent(alert);
-    const text = formatLiveAlert({
-      fixture,
-      advice,
-      level: alert.level,
-      source: alert.source,
-      whatHappened: alert.whatHappened,
-      fusion: summary,
-    });
+    recordAlert(w.memory, fixture.elapsed, alert.level, alert.kind);
+    const text =
+      config.liveAlertStyle === "compact"
+        ? buildCompactAlert(w, fixture, advice, alert)
+        : formatLiveAlert({
+            fixture,
+            advice,
+            level: alert.level,
+            source: alert.source,
+            whatHappened: alert.whatHappened,
+            fusion: summary,
+          });
     w.lastAnalysisText = text;
     w.lastAlertText = `${alert.level}/${alert.kind} (${alert.source}) @ ${new Date().toISOString().slice(11, 19)}`;
     w.alertsSent += 1;
@@ -185,16 +241,56 @@ async function apiPoll(w: WatchState): Promise<void> {
   sourceHealth.recordSuccess("api", Date.now() - t0, live.events.length, alerts.length);
   const fusion = computeFusion(w, live.fixture, advice, alerts);
   const f = live.fixture;
+
+  // Mémoire du match (score, but, conseil).
+  const prevPt = w.memory.scoreTimeline[w.memory.scoreTimeline.length - 1];
+  const changed = recordScore(w.memory, f.elapsed, f.homeGoals ?? 0, f.awayGoals ?? 0);
+  if (changed && prevPt) {
+    const side = (f.homeGoals ?? 0) > prevPt.home ? "home" : (f.awayGoals ?? 0) > prevPt.away ? "away" : null;
+    if (side) recordGoal(w.memory, f.elapsed, side, null);
+  }
+  recordAdvice(w.memory, f.elapsed, advice.action, null);
+
   tag(
     "API",
     `${f.elapsed ?? 0}' ${f.home.name} ${f.homeGoals ?? 0}-${f.awayGoals ?? 0} ${f.away.name} action=${advice.action} alert=${alerts.length > 0} conf=${fusion.confidence}`
   );
-  await dispatch(w, live.fixture, advice, alerts, fusion);
 
-  if (live.fixture.phase === "finished") {
-    tag("API", `match #${w.fixtureId} terminé — arrêt surveillance`);
-    w.active = false;
+  if (isFinished(live.fixture)) {
+    await handleFinishedMatch(w, live.fixture);
+    return;
   }
+  await dispatch(w, live.fixture, advice, alerts, fusion);
+}
+
+/** Envoi simple vers le chat configuré (avec boutons optionnels). */
+async function sendToChat(text: string, buttons?: InlineButton[][]): Promise<void> {
+  if (config.enableTelegram && config.telegramToken && config.telegramChatId) {
+    await sendTelegramMessage(config.telegramToken, config.telegramChatId, text, buttons).catch(() => undefined);
+  }
+}
+
+function nextMatchButtons(candidates: NormalizedFixture[]): InlineButton[][] | undefined {
+  const rows: InlineButton[][] = candidates.slice(0, 2).map((m) => [
+    { text: `📊 Analyser ${m.home.name}-${m.away.name}`, callback_data: `a:${m.fixtureId}` },
+    { text: "🔴 Surveiller", callback_data: `w:${m.fixtureId}` },
+    winamaxButton(m.fixtureId),
+  ]);
+  return rows.length ? rows : undefined;
+}
+
+/** Match terminé : résumé post-match compact + auto-stop + propose le suivant. */
+async function handleFinishedMatch(w: WatchState, fixture: NormalizedFixture): Promise<void> {
+  if (!w.active) return;
+  w.active = false;
+  tag("API", `match #${w.fixtureId} terminé (FT) — auto-stop + résumé post-match`);
+  const favoriteSide = favoriteSideFromForm(w.recentForm);
+  const text = composePostMatchSummary(fixture, w.memory, favoriteSide);
+  w.lastAnalysisText = text;
+  const next = await getNextActionableMatches().catch(() => ({ finished: [], live: [], upcoming: [], nextMatch: null }));
+  const buttons = nextMatchButtons([...next.live, ...next.upcoming]);
+  await sendToChat(text, buttons);
+  persist();
 }
 
 /* ----------------------------- Capteur commentaires (5s) ----------------------------- */
@@ -336,6 +432,7 @@ async function oddsPoll(w: WatchState): Promise<void> {
   }
   const cmp = compareOdds(w.sensors.lastOddsBoard, board);
   w.sensors.lastOddsBoard = board;
+  w.sensors.lastOddsComparison = cmp;
   const moves = cmp.movements.filter((m) => m.direction === "drop" || m.direction === "rise" || m.direction === "suspended");
   tag(
     "ODDS",
@@ -497,6 +594,7 @@ async function main(): Promise<void> {
   tag("MARKET", `enabled=${config.market.enabled} interval=${config.market.pollSeconds}s`);
   tag("WEATHER", `enabled=${config.weather.enabled} key=${config.weather.apiKeyConfigured ? "set" : "missing"} location=${config.weather.location ?? "-"}`);
   tag("ODDS", `enabled=${oddsApiConfig.enabled} provider=${oddsApiConfig.provider ?? "-"} interval=${oddsApiConfig.pollSeconds}s`);
+  tag("ALERTS", `style=${config.liveAlertStyle}`);
 
   // Chat id manquant => guide l'utilisateur.
   if (config.enableTelegram && !config.telegramChatId) {

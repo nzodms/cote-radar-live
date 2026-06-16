@@ -19,6 +19,7 @@ import { fetchLiveOdds } from "./odds/odds-provider";
 import { normalizeOddsResult } from "./odds/odds-normalizer";
 import { compareOdds } from "./odds/odds-snapshot";
 import { formatLiveBettingDecision, generateLiveBettingDecision } from "./live-betting-decision-engine";
+import { favoriteSideFromForm } from "./live-pressure";
 
 export interface CommandDeps {
   send: (text: string) => Promise<void>;
@@ -127,8 +128,12 @@ export async function runLiveBettingDecision(state: BotState, id: number): Promi
   // Compare au dernier board connu (mouvements de cote) puis met à jour le cache.
   const board = normalizeOddsResult(await fetchLiveOdds(id));
   const oddsSnapshot = compareOdds(watch?.sensors.lastOddsBoard ?? null, board);
-  if (watch && board.available) watch.sensors.lastOddsBoard = board;
+  if (watch && board.available) {
+    watch.sensors.lastOddsBoard = board;
+    watch.sensors.lastOddsComparison = oddsSnapshot;
+  }
 
+  const fav = favoriteSideFromForm(context.recentForm);
   const decision = generateLiveBettingDecision({
     fixture: live.fixture,
     statistics: live.statistics,
@@ -138,6 +143,8 @@ export async function runLiveBettingDecision(state: BotState, id: number): Promi
     minute: live.fixture.elapsed,
     score: { home: live.fixture.homeGoals ?? 0, away: live.fixture.awayGoals ?? 0 },
     lineupsConfirmed: context.lineups.length > 0,
+    favoriteSide: fav,
+    matchMemory: watch?.memory ?? null,
   });
 
   const text = formatLiveBettingDecision(live.fixture, decision);

@@ -225,6 +225,8 @@ async function routeAnalyse(): Promise<void> {
     forcedLive: async () => "live",
     overview: async () => ({ today: [], tomorrow: [], live: [] }),
     matchById: async () => match,
+    nextMatches: async () => ({ finished: [], live: [], upcoming: [], nextMatch: null }),
+    fixtureById: async () => data.fixture,
   };
   const sent: Array<{ text: string; buttons?: unknown }> = [];
   const ctx = { config: getBotConfig(), state: new BotState(), send: async (t: string, b?: unknown) => void sent.push({ text: t, buttons: b }) };
@@ -258,6 +260,8 @@ async function routeMarketsAndFull(): Promise<void> {
     forcedLive: async () => "live",
     overview: async () => ({ today: [], tomorrow: [], live: [] }),
     matchById: async () => match,
+    nextMatches: async () => ({ finished: [], live: [], upcoming: [], nextMatch: null }),
+    fixtureById: async () => data.fixture,
   };
   const cfg = getBotConfig();
 

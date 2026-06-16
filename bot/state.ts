@@ -21,7 +21,9 @@ import type {
   MarketSnapshot,
 } from "./scraper-types";
 import type { NormalizedOddsBoard } from "./odds/odds-normalizer";
+import type { OddsSnapshotComparison } from "./odds/odds-snapshot";
 import { AlertGate } from "./alert-classifier";
+import { createMatchMemory, type MatchMemory } from "./match-memory";
 
 export interface SensorState {
   lastMarketSnapshot: MarketSnapshot | null;
@@ -36,6 +38,7 @@ export interface SensorState {
   lastAltStatsPollAt: number;
   // Cotes API (optionnel) — board courant pour détecter les mouvements (runtime).
   lastOddsBoard: NormalizedOddsBoard | null;
+  lastOddsComparison: OddsSnapshotComparison | null;
   lastOddsPollAt: number;
 }
 
@@ -84,6 +87,9 @@ export interface WatchState {
 
   // Capteurs multi-sources
   sensors: SensorState;
+
+  // Mémoire du match depuis le /watch (historique, marchés, narratif)
+  memory: MatchMemory;
 
   // Statut / sortie
   lastAction: string | null;
@@ -135,8 +141,10 @@ export function createWatchState(
       lastNewsPollAt: 0,
       lastAltStatsPollAt: 0,
       lastOddsBoard: null,
+      lastOddsComparison: null,
       lastOddsPollAt: 0,
     },
+    memory: createMatchMemory(fixtureId),
     lastAction: null,
     alertsSent: 0,
     lastAlertText: null,
