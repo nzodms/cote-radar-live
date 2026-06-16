@@ -349,6 +349,57 @@ Variables : `ENABLE_LIVE_MONITOR`, `LIVE_POLL_INTERVAL_SECONDS`, `STATS_POLL_INT
 
 ---
 
+## 🤖 Bot Telegram (worker indépendant) — `bot/`
+
+Assistant Telegram (Node + TS) **indépendant de Vercel** : analyse complète avant match + analyse
+live temps réel, en réutilisant le même cerveau (`generateLiveBettingAdvice`).
+
+**Lancer** : `npm run worker` (process long-running, à mettre sur un VPS / Railway / Render).
+
+**Configurer `.env`** (worker) :
+```
+APISPORTS_KEY=...
+TELEGRAM_BOT_TOKEN=...        # via @BotFather
+TELEGRAM_CHAT_ID=...          # voir ci-dessous
+FIXTURE_ID=1489378            # match auto-surveillé au démarrage (optionnel)
+MATCH_LABEL=Iran vs New Zealand
+WINAMAX_MATCH_URL=            # page PUBLIQUE de commentaires (source secondaire)
+API_POLL_INTERVAL_SECONDS=30
+WINAMAX_POLL_INTERVAL_SECONDS=10
+MAX_API_CALLS_PER_DAY=7500
+ENABLE_TELEGRAM_ALERTS=true
+ENABLE_WINAMAX_COMMENTARY_WATCHER=true
+ENABLE_API_FOOTBALL_MONITOR=true
+```
+
+**Obtenir `TELEGRAM_CHAT_ID`** : crée le bot via **@BotFather**, envoie-lui un message, puis ouvre
+`https://api.telegram.org/bot<TOKEN>/getUpdates` → le `chat.id` apparaît dans le JSON.
+
+**Commandes** : `/start` `/help` `/analyse_match <id>` `/analyse_live <id>` `/watch <id>`
+`/stop <id>` `/status` `/last` `/context <id>`.
+
+**Anti-spam intelligent (corrigé)** : l'anti-spam évite le bruit, jamais les infos importantes.
+- **CRITICAL** (but, penalty, rouge, VAR, égalisation, retournement, SIGNAL→INVALIDATED) : **envoi
+  immédiat, aucun cooldown bloquant** ; seul le doublon exact du même événement est filtré.
+- **HIGH** (tir cadré, séquence, WAIT→WATCH, WATCH→SIGNAL…) : envoyé s'il change/renforce
+  l'analyse ; cooldown court (30 s) seulement sur une **analyse identique**.
+- **MEDIUM** : pas envoyé seul, bufferisé pour détecter des séquences (`detectOffensiveSequence`).
+- **LOW** : ignoré.
+
+**Source secondaire** (Winamax/commentaires publics, page publique uniquement, pas de login/captcha) :
+détecte vite, **ne décide jamais seule** → action plafonnée à **WATCH**, mention « source secondaire,
+à confirmer », puis confirmation API immédiate.
+
+**Marchés déjà résolus** (Over 1.5 si total ≥ 2, Over 2.5 si ≥ 3, BTTS si les deux ont marqué) ne
+sont **jamais** conseillés et sont affichés à part.
+
+**Tests** : `npm run test-telegram` (classification, anti-spam, séquences, transitions, commandes)
+et `npm run test-immediate-analysis` (analyse pré-match complète, contexte, alerte live).
+
+> Le worker fonctionne **sans Supabase** (état en mémoire). Il réutilise `lib/` via les alias `@/`.
+
+---
+
 ## 💸 Respecter le plan Free (100 requêtes/jour)
 
 - Les **pages lisent la base** (dashboard, matchs, détail, historique) → **0 appel API**.
