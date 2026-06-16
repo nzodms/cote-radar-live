@@ -13,7 +13,27 @@ import type {
 import type { ExternalCommentaryEvent } from "@/types/commentary";
 import type { LiveBettingAdvice, StatsSnapshotPoint } from "@/types/live-advice";
 import type { BufferedEvent } from "./types";
+import type {
+  AltStatsSnapshot,
+  ContextSignal,
+  LineupSignal,
+  MarketEvent,
+  MarketSnapshot,
+} from "./scraper-types";
 import { AlertGate } from "./alert-classifier";
+
+export interface SensorState {
+  lastMarketSnapshot: MarketSnapshot | null;
+  recentMarketEvents: MarketEvent[];
+  lineupSignals: LineupSignal[];
+  contextSignals: ContextSignal[];
+  altStats: AltStatsSnapshot | null;
+  knownMarketIds: Set<string>;
+  lastMarketPollAt: number;
+  lastLineupPollAt: number;
+  lastNewsPollAt: number;
+  lastAltStatsPollAt: number;
+}
 
 export interface WatchState {
   fixtureId: number;
@@ -44,11 +64,15 @@ export interface WatchState {
   lastWinamaxPollAt: number;
   winamaxErrorCount: number;
 
+  // Capteurs multi-sources
+  sensors: SensorState;
+
   // Statut / sortie
   lastAction: string | null;
   alertsSent: number;
   lastAlertText: string | null;
   lastAnalysisText: string | null;
+  lastCommentaryText: string | null;
 }
 
 export function createWatchState(fixtureId: number, label: string): WatchState {
@@ -74,10 +98,23 @@ export function createWatchState(fixtureId: number, label: string): WatchState {
     lastApiPollAt: 0,
     lastWinamaxPollAt: 0,
     winamaxErrorCount: 0,
+    sensors: {
+      lastMarketSnapshot: null,
+      recentMarketEvents: [],
+      lineupSignals: [],
+      contextSignals: [],
+      altStats: null,
+      knownMarketIds: new Set(),
+      lastMarketPollAt: 0,
+      lastLineupPollAt: 0,
+      lastNewsPollAt: 0,
+      lastAltStatsPollAt: 0,
+    },
     lastAction: null,
     alertsSent: 0,
     lastAlertText: null,
     lastAnalysisText: null,
+    lastCommentaryText: null,
   };
 }
 
@@ -86,6 +123,18 @@ export class BotState {
   startedAt = Date.now();
   lastApiPollAt: number | null = null;
   lastWinamaxPollAt: number | null = null;
+  apiCallsUsedToday = 0;
+  apiCallsDate = new Date().toISOString().slice(0, 10);
+
+  /** Incrémente le compteur d'appels API du jour (reset auto chaque jour UTC). */
+  bumpApi(n: number): void {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.apiCallsDate) {
+      this.apiCallsDate = today;
+      this.apiCallsUsedToday = 0;
+    }
+    this.apiCallsUsedToday += n;
+  }
 
   startWatch(fixtureId: number, label: string): WatchState {
     const existing = this.watches.get(fixtureId);

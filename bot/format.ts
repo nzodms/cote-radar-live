@@ -29,6 +29,8 @@ export interface LiveAlertParams {
   level: AlertLevel;
   source: AlertSource;
   whatHappened: string;
+  /** Synthèse fusion multi-sources (optionnelle). */
+  fusion?: { sources: string[]; contradictions: string[]; confidence: string };
 }
 
 export function formatLiveAlert(p: LiveAlertParams): string {
@@ -47,6 +49,12 @@ export function formatLiveAlert(p: LiveAlertParams): string {
   lines.push(`⏱ ${min} · ${f.statusLong}`);
   lines.push(`Niveau : ${level}`);
   lines.push(`Source : ${sourceLabel}`);
+  if (p.fusion) {
+    lines.push(`Sources croisées : ${p.fusion.sources.join(", ") || "—"} (confiance: ${p.fusion.confidence})`);
+    if (p.fusion.contradictions.length > 0) {
+      lines.push(`⚠ Contradictions : ${p.fusion.contradictions.join(" | ")}`);
+    }
+  }
   lines.push("");
   lines.push(`Action : ${displayAction}${secondaryNote}`);
   lines.push("");
@@ -120,6 +128,7 @@ export function formatStartHelp(): string {
     "/analyse_live <id>   — force une analyse live immédiate",
     "/context <id>        — contexte du match + plan live",
     "/status              — état du worker (match suivi, dernier score/action/poll)",
+    "/sources             — santé des capteurs (API, commentaires, marché, …)",
     "/last                — dernière analyse live complète",
     "/help                — cette aide",
     "",

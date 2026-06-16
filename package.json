@@ -9,9 +9,13 @@
     "start": "next start",
     "lint": "next lint",
     "worker": "tsx bot/worker.ts",
-    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts && tsx tests/telegram.test.ts && tsx tests/immediate-analysis.test.ts",
+    "worker:debug": "tsx bot/debug.ts",
+    "simulate-hot-event": "tsx bot/simulate-hot-event.ts",
+    "simulate-critical-event": "tsx bot/simulate-critical-event.ts",
+    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts && tsx tests/telegram.test.ts && tsx tests/immediate-analysis.test.ts && tsx tests/multi-source.test.ts",
     "test-telegram": "tsx tests/telegram.test.ts",
-    "test-immediate-analysis": "tsx tests/immediate-analysis.test.ts"
+    "test-immediate-analysis": "tsx tests/immediate-analysis.test.ts",
+    "test-multi-source": "tsx tests/multi-source.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

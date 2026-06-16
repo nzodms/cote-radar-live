@@ -14,6 +14,7 @@ import {
   fetchPreMatchData,
 } from "./prematch-analysis";
 import { fetchApiLive, fetchContextOnce, runLiveCycle } from "./live-engine";
+import { sourceHealth } from "./scrapers/source-health";
 
 export interface CommandDeps {
   send: (text: string) => Promise<void>;
@@ -114,6 +115,27 @@ function formatStatus(state: BotState, config: BotConfig): string {
   return L.join("\n");
 }
 
+function statusLabel(name: string, enabled: boolean): string {
+  if (!enabled) return "disabled";
+  const h = sourceHealth.get(name);
+  if (!h) return "OK (en attente)";
+  return h.status;
+}
+
+function formatSources(config: BotConfig): string {
+  const L: string[] = [];
+  L.push("🔌 État des sources");
+  L.push(`• API-Football : ${config.enableApiMonitor ? statusLabel("api", true) : "disabled"} (poll ${config.apiPollSeconds}s)`);
+  L.push(`• Commentary scraper : ${statusLabel("commentary", config.commentary.enabled)} (poll ${config.commentary.pollSeconds}s)`);
+  L.push(`• Market scraper : ${statusLabel("market", config.market.enabled)} (poll ${config.market.pollSeconds}s)`);
+  L.push(`• Lineup scraper : ${statusLabel("lineup", config.lineup.enabled)} (poll ${config.lineup.pollSeconds}s)`);
+  L.push(`• News scraper : ${statusLabel("news", config.news.enabled)} (poll ${config.news.pollSeconds}s)`);
+  L.push(`• Alt stats scraper : ${statusLabel("altStats", config.altStats.enabled)} (poll ${config.altStats.pollSeconds}s)`);
+  L.push("");
+  L.push("Règle: API-Football reste la source principale. Les sources secondaires seules = WATCH maximum.");
+  return L.join("\n");
+}
+
 function lastAnalysis(state: BotState): string {
   const watches = [...state.watches.values()].filter((w) => w.lastAnalysisText);
   if (watches.length === 0) return "Aucune analyse live disponible pour l'instant. Lance /watch <id> ou /analyse_live <id>.";
@@ -187,6 +209,10 @@ export async function handleCommand(rawText: string, deps: CommandDeps): Promise
 
       case "/status":
         await send(formatStatus(state, config));
+        return;
+
+      case "/sources":
+        await send(formatSources(config));
         return;
 
       case "/last":

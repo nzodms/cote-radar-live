@@ -163,4 +163,14 @@ export class AlertGate {
   alreadySent(dedupId: string): boolean {
     return this.sentIds.has(dedupId);
   }
+
+  /** Restaure des dedupIds déjà envoyés (persistance: éviter le re-spam au redémarrage). */
+  seed(ids: string[]): void {
+    for (const id of ids) this.sentIds.add(id);
+  }
+
+  /** Snapshot des dedupIds envoyés (pour persistance). */
+  sentSnapshot(): string[] {
+    return [...this.sentIds];
+  }
 }

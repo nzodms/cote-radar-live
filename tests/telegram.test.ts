@@ -135,7 +135,14 @@ console.log("\n[T6] Source secondaire = WATCH maximum à l'affichage");
 console.log("\n[T7] Routage des commandes");
 async function runCommands(): Promise<void> {
   const state = new BotState();
-  const config: BotConfig = { apiKey: "x", telegramToken: null, telegramChatId: null, defaultFixtureId: 1489378, matchLabel: "Iran vs NZ", winamaxUrl: null, apiPollSeconds: 30, winamaxPollSeconds: 10, maxApiCallsPerDay: 7500, enableTelegram: true, enableWinamax: true, enableApiMonitor: true };
+  const scraper = (enabled: boolean, pollSeconds: number) => ({ enabled, url: null, pollSeconds });
+  const config: BotConfig = {
+    apiKey: "x", telegramToken: null, telegramChatId: null, defaultFixtureId: 1489378, matchLabel: "Iran vs NZ",
+    apiPollSeconds: 30, maxApiCallsPerDay: 7500, enableTelegram: true, enableApiMonitor: true, statePath: "data/state.json",
+    commentary: scraper(true, 5), market: scraper(true, 10), lineup: scraper(true, 300),
+    news: { enabled: true, urls: [], pollSeconds: 900 }, altStats: scraper(false, 30),
+    winamaxUrl: null, winamaxPollSeconds: 5, enableWinamax: true,
+  };
   const sent: string[] = [];
   const deps = {
     send: async (t: string) => void sent.push(t),
@@ -168,6 +175,9 @@ async function runCommands(): Promise<void> {
 
   await handleCommand("/status", deps);
   check("/status renvoie l'état du worker", sent[sent.length - 1].includes("Statut du worker"));
+
+  await handleCommand("/sources", deps);
+  check("/sources affiche l'état des sources", sent[sent.length - 1].includes("État des sources") && sent[sent.length - 1].includes("API-Football"));
 
   await handleCommand("/stop 1489378", deps);
   check("/stop arrête la surveillance", state.activeWatches().length === 0);

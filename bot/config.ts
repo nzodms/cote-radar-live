@@ -45,35 +45,89 @@ function bool(v: string | undefined, d: boolean): boolean {
   return v === undefined ? d : v.toLowerCase() === "true";
 }
 
+export interface ScraperConfig {
+  enabled: boolean;
+  url: string | null;
+  pollSeconds: number;
+}
+
 export interface BotConfig {
   apiKey: string | null;
   telegramToken: string | null;
   telegramChatId: string | null;
   defaultFixtureId: number | null;
   matchLabel: string | null;
-  winamaxUrl: string | null;
   apiPollSeconds: number;
-  winamaxPollSeconds: number;
   maxApiCallsPerDay: number;
   enableTelegram: boolean;
-  enableWinamax: boolean;
   enableApiMonitor: boolean;
+  statePath: string;
+
+  // Capteurs multi-sources
+  commentary: ScraperConfig;
+  market: ScraperConfig;
+  lineup: ScraperConfig;
+  news: { enabled: boolean; urls: string[]; pollSeconds: number };
+  altStats: ScraperConfig;
+
+  // Alias rétro-compat
+  winamaxUrl: string | null;
+  winamaxPollSeconds: number;
+  enableWinamax: boolean;
 }
 
 export function getBotConfig(): BotConfig {
   const fid = Number.parseInt(process.env.FIXTURE_ID ?? "", 10);
+
+  // Commentaires: nouveaux noms prioritaires, fallback sur les anciens (Winamax).
+  // Défaut 5s = scraper ultra-réactif (point 1).
+  const commentary: ScraperConfig = {
+    enabled: bool(process.env.ENABLE_COMMENTARY_SCRAPER ?? process.env.ENABLE_WINAMAX_COMMENTARY_WATCHER, true),
+    url: process.env.COMMENTARY_SOURCE_URL || process.env.WINAMAX_MATCH_URL || null,
+    pollSeconds: int(process.env.COMMENTARY_POLL_INTERVAL_SECONDS ?? process.env.WINAMAX_POLL_INTERVAL_SECONDS, 5),
+  };
+  const market: ScraperConfig = {
+    enabled: bool(process.env.ENABLE_MARKET_SCRAPER, true),
+    url: process.env.MARKET_SOURCE_URL || null,
+    pollSeconds: int(process.env.MARKET_POLL_INTERVAL_SECONDS, 10),
+  };
+  const lineup: ScraperConfig = {
+    enabled: bool(process.env.ENABLE_LINEUP_INJURY_SCRAPER, true),
+    url: process.env.LINEUP_SOURCE_URL || null,
+    pollSeconds: int(process.env.LINEUP_POLL_INTERVAL_SECONDS, 300),
+  };
+  const news = {
+    enabled: bool(process.env.ENABLE_NEWS_CONTEXT_SCRAPER, true),
+    urls: (process.env.NEWS_CONTEXT_SOURCE_URLS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    pollSeconds: int(process.env.NEWS_CONTEXT_POLL_INTERVAL_SECONDS, 900),
+  };
+  const altStats: ScraperConfig = {
+    enabled: bool(process.env.ENABLE_ALT_LIVE_STATS_SCRAPER, false),
+    url: process.env.ALT_LIVE_STATS_SOURCE_URL || null,
+    pollSeconds: int(process.env.ALT_LIVE_STATS_POLL_INTERVAL_SECONDS, 30),
+  };
+
   return {
     apiKey: process.env.APISPORTS_KEY || null,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN || null,
     telegramChatId: process.env.TELEGRAM_CHAT_ID || null,
     defaultFixtureId: Number.isFinite(fid) && fid > 0 ? fid : null,
     matchLabel: process.env.MATCH_LABEL || null,
-    winamaxUrl: process.env.WINAMAX_MATCH_URL || null,
     apiPollSeconds: int(process.env.API_POLL_INTERVAL_SECONDS, 30),
-    winamaxPollSeconds: int(process.env.WINAMAX_POLL_INTERVAL_SECONDS, 10),
     maxApiCallsPerDay: int(process.env.MAX_API_CALLS_PER_DAY, 7500),
     enableTelegram: bool(process.env.ENABLE_TELEGRAM_ALERTS, true),
-    enableWinamax: bool(process.env.ENABLE_WINAMAX_COMMENTARY_WATCHER, true),
     enableApiMonitor: bool(process.env.ENABLE_API_FOOTBALL_MONITOR, true),
+    statePath: process.env.STATE_PATH || "data/state.json",
+    commentary,
+    market,
+    lineup,
+    news,
+    altStats,
+    winamaxUrl: commentary.url,
+    winamaxPollSeconds: commentary.pollSeconds,
+    enableWinamax: commentary.enabled,
   };
 }

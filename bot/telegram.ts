@@ -60,6 +60,17 @@ export async function sendTelegramMessage(
   return { ok: true };
 }
 
+export async function getMe(token: string): Promise<{ ok: boolean; username?: string }> {
+  try {
+    const res = await fetch(`${TG_API}/bot${token}/getMe`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { ok: false };
+    const json = (await res.json()) as { ok: boolean; result?: { username?: string } };
+    return { ok: Boolean(json.ok), username: json.result?.username };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function getUpdates(token: string, offset: number, timeout = 30): Promise<TgUpdate[]> {
   try {
     const res = await fetch(`${TG_API}/bot${token}/getUpdates?timeout=${timeout}&offset=${offset}`, {
