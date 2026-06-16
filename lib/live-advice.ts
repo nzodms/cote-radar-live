@@ -31,6 +31,7 @@ import type {
   MomentumSummary,
   NextCheck,
   RecommendedMarket,
+  ResolvedMarket,
   StatsSnapshotPoint,
   Urgency,
   WindowSummary,
@@ -204,6 +205,26 @@ export function generateLiveBettingAdvice(input: GenerateLiveAdviceInput): LiveB
   const matchScenario = `${context.scenarioShift} ${context.groupContext}`.trim();
   const finalVerdict = buildFinalVerdict(decision, confidence, odds.available);
 
+  // Ne JAMAIS conseiller un marché déjà résolu par le score.
+  const { active: recommendedMarkets, resolved: resolvedMarkets } = filterResolvedMarkets({
+    scoreHome: fixture.homeGoals,
+    scoreAway: fixture.awayGoals,
+    recommendedMarkets: decision.markets,
+  });
+
+  const whatIWouldDoNow = buildWhatIWouldDoNow({
+    action: decision.action,
+    markets: recommendedMarkets,
+    avoid: decision.avoid,
+    resolved: resolvedMarkets,
+    homeName,
+    awayName,
+    hg,
+    ag,
+    oddsAvailable: odds.available,
+    hasStats: statistics.hasData,
+  });
+
   return {
     action: decision.action,
     mainAdvice: decision.mainAdvice,
@@ -212,10 +233,12 @@ export function generateLiveBettingAdvice(input: GenerateLiveAdviceInput): LiveB
     confidence,
     urgency: decision.urgency,
     dominantTeam,
+    whatIWouldDoNow,
     momentum: momentumSummary,
     contextComparison,
-    recommendedMarkets: decision.markets,
+    recommendedMarkets,
     avoidMarkets: decision.avoid,
+    resolvedMarkets,
     risks,
     nextCheck,
     dataQuality,
@@ -293,12 +316,14 @@ function decide(args: DecideArgs): Decision {
   }
 
   if (!statistics.hasData) {
+    const open = hg + ag >= 3;
     return {
       action: "WAIT",
       markets: [],
-      avoid: [{ market: "no_bet", reason: "Aucune statistique live exploitable." }],
-      mainAdvice:
-        "WAIT: données insuffisantes pour un signal sérieux. Aucune statistique live exploitable pour l'instant. No bet recommandé jusqu'au prochain sync.",
+      avoid: [{ market: "no_bet", reason: "Statistiques live absentes: pas de momentum mesurable." }],
+      mainAdvice: `WAIT: peu de statistiques live exploitables. On lit surtout le score ${hg}-${ag} à la ${elapsed}'.${
+        open ? " Match ouvert (over 1.5/2.5 et BTTS souvent déjà passés)." : ""
+      } Sans momentum mesurable, no bet pour l'instant; surveiller la reprise d'une pression nette.`,
       urgency: "low",
       extraRisks: [],
     };
@@ -730,7 +755,7 @@ function resolveGenericAction(args: {
   let urgency: Urgency;
 
   if (action === "SIGNAL" && primary) {
-    mainAdvice = `SIGNAL (${frSignal(primary.signal)}): ${primary.label}. ${primary.reasoning} Condition d'invalidation: ${primary.invalidation}.${oddsNote}`;
+    mainAdvice = `SIGNAL (${frSignal(primary.signal)}): ${primary.label}. ${primary.reasoning} Condition d'invalidation: ${primary.invalidation}${oddsNote}`;
     urgency = primary.signal === "strong" ? "high" : "medium";
   } else if (action === "WATCH" && primary) {
     mainAdvice = `WATCH: ${primary.label} devient intéressant mais demande confirmation. ${primary.requiredConfirmation}${oddsNote}`;
@@ -817,7 +842,12 @@ function buildLiveReading(args: {
     return `Match à venir. ${context.preMatchExpectation} ${context.recentFormSummary}`;
   }
   if (!args.statistics.hasData) {
-    return "Données live insuffisantes: lecture fiable impossible pour l'instant.";
+    const hg = fixture.homeGoals ?? 0;
+    const ag = fixture.awayGoals ?? 0;
+    const open = hg + ag >= 3 ? ` Le score ${hg}-${ag} indique un match ouvert et instable.` : "";
+    return `Statistiques live limitées: lecture basée surtout sur le score (${hg}-${ag}), la minute (${
+      fixture.elapsed ?? 0
+    }') et les événements.${open} Lecture prudente.`;
   }
   const parts: string[] = [];
   parts.push(
@@ -839,7 +869,7 @@ function buildLiveReading(args: {
 function buildFinalVerdict(decision: Decision, confidence: AdviceConfidence, oddsAvailable: boolean): string {
   const prudence =
     "Verdict prudent: lecture informative, aucune issue garantie. Si le doute persiste, no bet.";
-  const oddsNote = oddsAvailable ? "" : " (cotes indisponibles: pas de value confirmée).";
+  const oddsNote = oddsAvailable ? "" : " (cotes indisponibles: pas de value confirmée)";
   switch (decision.action) {
     case "SIGNAL":
       return `Action SIGNAL — un marché à surveiller se dégage avec une confiance ${frConfidence(confidence)}${oddsNote}. ${prudence}`;
@@ -880,4 +910,92 @@ function frSignal(s: RecommendedMarket["signal"]): string {
 
 function frConfidence(c: AdviceConfidence): string {
   return c === "high" ? "élevée" : c === "medium" ? "moyenne" : "faible";
+}
+
+/**
+ * Retire des marchés conseillés ceux déjà RÉSOLUS par le score.
+ * - total >= 2 : over 1.5 résolu
+ * - total >= 3 : over 2.5 résolu
+ * - les deux équipes ont marqué : BTTS résolu
+ */
+export function filterResolvedMarkets(args: {
+  scoreHome: number | null;
+  scoreAway: number | null;
+  recommendedMarkets: RecommendedMarket[];
+}): { active: RecommendedMarket[]; resolved: ResolvedMarket[] } {
+  const h = args.scoreHome ?? 0;
+  const a = args.scoreAway ?? 0;
+  const total = h + a;
+  const resolvedKeys = new Set<string>();
+  const resolved: ResolvedMarket[] = [];
+
+  if (total >= 2) {
+    resolvedKeys.add("over_1_5");
+    resolved.push({ market: "over_1_5", label: "Over 1.5 buts", note: "Déjà atteint (2 buts ou plus)." });
+  }
+  if (total >= 3) {
+    resolvedKeys.add("over_2_5");
+    resolved.push({ market: "over_2_5", label: "Over 2.5 buts", note: "Déjà atteint (3 buts ou plus)." });
+  }
+  if (h > 0 && a > 0) {
+    resolvedKeys.add("btts");
+    resolved.push({ market: "btts", label: "Les deux équipes marquent", note: "Déjà réalisé." });
+  }
+
+  const active = (args.recommendedMarkets ?? []).filter((m) => !resolvedKeys.has(m.market));
+  return { active, resolved };
+}
+
+function buildWhatIWouldDoNow(args: {
+  action: LiveAction;
+  markets: RecommendedMarket[];
+  avoid: AvoidMarket[];
+  resolved: ResolvedMarket[];
+  homeName: string;
+  awayName: string;
+  hg: number;
+  ag: number;
+  oddsAvailable: boolean;
+  hasStats: boolean;
+}): string {
+  const { action, markets, resolved, oddsAvailable, hg, ag } = args;
+  const primary = markets[0] ?? null;
+
+  let core: string;
+  switch (action) {
+    case "SIGNAL":
+      core = primary
+        ? `je surveille en priorité « ${primary.label} » (signal ${frSignal(primary.signal)}) et je n'engage rien tant que ce n'est pas confirmé (${primary.requiredConfirmation})`
+        : "je surveille de près, mais sans marché clair je n'engage rien";
+      break;
+    case "WATCH":
+      core = primary
+        ? `je surveille « ${primary.label} » sans me précipiter et n'agis que si ${primary.requiredConfirmation.toLowerCase()}`
+        : "je surveille la reprise d'une pression nette avant d'agir";
+      break;
+    case "AVOID":
+      core = "j'évite le live pour l'instant (no bet): configuration piégeuse ou trop incertaine";
+      break;
+    case "INVALIDATED":
+      core = "je considère les signaux précédents annulés (événement majeur) et je repars de l'observation, sans engager";
+      break;
+    default:
+      core = primary
+        ? `j'attends: je ne fais rien tant que je n'ai pas ${primary.requiredConfirmation.toLowerCase()}`
+        : "j'attends: pas de signal sérieux, donc no bet pour l'instant";
+  }
+
+  const scoreNote =
+    hg + ag >= 3
+      ? ` Le score ${hg}-${ag} rend le match ouvert et instable: je me concentre sur le prochain but ou je m'abstiens.`
+      : "";
+  const resolvedNote =
+    resolved.length > 0
+      ? ` Marchés déjà passés (à ignorer comme opportunités): ${resolved.map((r) => r.label).join(", ")}.`
+      : "";
+  const oddsNote = oddsAvailable
+    ? ""
+    : " Sans cotes live, je ne valide aucune value: au mieux du marché à surveiller.";
+
+  return `Ce que je ferais maintenant : ${core}.${scoreNote}${resolvedNote}${oddsNote}`;
 }

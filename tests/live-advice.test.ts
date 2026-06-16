@@ -296,6 +296,42 @@ console.log("\n[11] Fenêtre 5 min : pression mesurée via deltas de snapshots")
   check("delta tirs cadrés home = 2", w.home.shotsOnTarget === 2, w.home.shotsOnTarget);
 }
 
+console.log("\n[12] Iran 2-2 NZ (Second Half) : marchés résolus filtrés");
+{
+  const a = advise({
+    fixture: fixture({ elapsed: 70, statusShort: "2H", statusLong: "Second Half", homeGoals: 2, awayGoals: 2 }),
+    statistics: stats(
+      team({ totalShots: 10, shotsOnGoal: 5, cornerKicks: 5, ballPossession: 51 }),
+      team({ totalShots: 9, shotsOnGoal: 4, cornerKicks: 4, ballPossession: 49 })
+    ),
+    events: [goal(15, HOME_ID), goal(30, AWAY_ID), goal(55, HOME_ID), goal(63, AWAY_ID)],
+  });
+  const resolved = a.resolvedMarkets.map((r) => r.market);
+  check("over 1.5 marqué résolu", resolved.includes("over_1_5"), resolved);
+  check("over 2.5 marqué résolu", resolved.includes("over_2_5"), resolved);
+  check("BTTS marqué résolu", resolved.includes("btts"), resolved);
+  const rec = a.recommendedMarkets.map((m) => m.market);
+  check("over 1.5 PAS conseillé", !rec.includes("over_1_5"), rec);
+  check("over 2.5 PAS conseillé", !rec.includes("over_2_5"), rec);
+  check("BTTS PAS conseillé", !rec.includes("btts"), rec);
+  check("action = WATCH ou WAIT", a.action === "WATCH" || a.action === "WAIT", a.action);
+  check("'Ce que je ferais maintenant' renseigné", a.whatIWouldDoNow.startsWith("Ce que je ferais"));
+}
+
+console.log("\n[13] Stats absentes mais score 2-2 : analyse quand même");
+{
+  const a = advise({
+    fixture: fixture({ elapsed: 70, statusShort: "2H", statusLong: "Second Half", homeGoals: 2, awayGoals: 2 }),
+    statistics: stats(team({}), team({}), false),
+    events: [goal(15, HOME_ID), goal(30, AWAY_ID), goal(55, HOME_ID), goal(63, AWAY_ID)],
+  });
+  check("dataQuality.hasStatistics = false", a.dataQuality.hasStatistics === false);
+  check("mainAdvice non vide", a.mainAdvice.length > 0);
+  check("mentionne le score 2-2", a.mainAdvice.includes("2-2"), a.mainAdvice);
+  check("over markets résolus malgré stats absentes", a.resolvedMarkets.some((r) => r.market === "over_2_5"));
+  check("whatIWouldDoNow non vide", a.whatIWouldDoNow.length > 20);
+}
+
 /* ---------------- résultat ---------------- */
 if (failures > 0) {
   console.error(`\n❌ ${failures} assertion(s) en échec.`);

@@ -51,6 +51,7 @@ import type {
   RecentForm,
 } from "@/types/match";
 import type {
+  AdviceDebug,
   LiveAdviceHistoryEntry,
   LiveBettingAdvice,
   StatsSnapshotPoint,
@@ -116,6 +117,7 @@ export interface MatchDetailResult {
   recentForm: { home: RecentForm | null; away: RecentForm | null };
   h2h: H2HSummary | null;
   history: AnalysisHistoryEntry[];
+  debug: AdviceDebug;
   lastSyncedAt: string | null;
   freshnessSeconds: number | null;
 }
@@ -487,24 +489,12 @@ export async function syncLiveFixture(
 
     // 9.f conseil live (assistant)
     {
-      const { error } = await supabase.from(TABLES.liveAdviceSnapshots).insert({
-        fixture_id: fixtureId,
-        minute: fixture.elapsed,
-        score_home: fixture.homeGoals,
-        score_away: fixture.awayGoals,
-        action: liveAdvice.action,
-        main_advice: liveAdvice.mainAdvice,
-        confidence: liveAdvice.confidence,
-        urgency: liveAdvice.urgency,
-        recommended_markets: liveAdvice.recommendedMarkets as any,
-        avoid_markets: liveAdvice.avoidMarkets as any,
-        risks: liveAdvice.risks as any,
-        invalidation_conditions: liveAdvice.recommendedMarkets.map((m) => m.invalidation) as any,
-        data_quality: liveAdvice.dataQuality as any,
-        raw_advice: liveAdvice as any,
-      });
-      if (error) warnings.push(`Insert conseil live échoué: ${error.message}`);
-      else stored.liveAdviceSnapshot = true;
+      const okAdvice = await persistLiveAdvice(supabase, fixtureId, fixture, liveAdvice);
+      if (okAdvice) stored.liveAdviceSnapshot = true;
+      else
+        warnings.push(
+          "Insert conseil live échoué (table live_advice_snapshots manquante ? Rejouer la migration 0002)."
+        );
     }
 
     // 9.g snapshots de cotes (préparation value / affiliation)
@@ -607,6 +597,7 @@ export async function loadMatchDetail(fixtureId: number): Promise<MatchDetailRes
     recentForm: { home: null, away: null },
     h2h: null,
     history: [],
+    debug: emptyAdviceDebug(fixtureId),
     lastSyncedAt: null,
     freshnessSeconds: null,
   };
@@ -694,10 +685,22 @@ export async function loadMatchDetail(fixtureId: number): Promise<MatchDetailRes
     risks: r.risks ?? [],
   }));
 
-  // conseil live (dernier) + historique conseils + commentaires
-  const liveAdvice = await loadLatestLiveAdvice(fixtureId);
+  // conseil live (dernier) + historique conseils + commentaires + debug
+  const adviceRow = await loadLatestLiveAdviceRow(fixtureId);
+  const liveAdvice = adviceRow ? ((adviceRow.raw_advice as LiveBettingAdvice) ?? null) : null;
   const adviceHistory = await loadFixtureAdviceHistory(fixtureId, matchRow);
   const commentary = await loadCommentaryEvents(fixtureId);
+  const previousSnapshots = await loadStatsSnapshotPoints(fixtureId, 20);
+
+  const debug = buildAdviceDebug({
+    fixture,
+    statistics,
+    eventsCount: events.length,
+    lineupsCount: lineups.length,
+    previousSnapshotsCount: previousSnapshots.length,
+    liveAdvice,
+    lastAdviceAt: adviceRow?.collected_at ?? null,
+  });
 
   return {
     fixture,
@@ -711,6 +714,7 @@ export async function loadMatchDetail(fixtureId: number): Promise<MatchDetailRes
     recentForm,
     h2h,
     history,
+    debug,
     lastSyncedAt: matchRow.last_synced_at ?? null,
     freshnessSeconds,
   };
@@ -961,6 +965,128 @@ export async function loadLatestLiveAdvice(fixtureId: number): Promise<LiveBetti
   return (row.raw_advice as LiveBettingAdvice) ?? null;
 }
 
+export interface GenerateAdviceResult {
+  ok: boolean;
+  message: string;
+  advice: LiveBettingAdvice | null;
+  debug: AdviceDebug;
+  persisted: boolean;
+  warnings: string[];
+}
+
+/**
+ * Génère un conseil live À PARTIR DES DONNÉES DÉJÀ EN BASE (aucun appel API).
+ * Stocke le résultat dans live_advice_snapshots et le renvoie.
+ * Utilisé par le bouton "Générer l'analyse maintenant".
+ */
+export async function generateAdviceFromStoredData(fixtureId: number): Promise<GenerateAdviceResult> {
+  const warnings: string[] = [];
+  const supabase = getServiceSupabase();
+  if (!supabase) {
+    return {
+      ok: false,
+      message: "Supabase non configuré: impossible de générer/stocker l'analyse.",
+      advice: null,
+      debug: emptyAdviceDebug(fixtureId),
+      persisted: false,
+      warnings: ["Supabase non configuré."],
+    };
+  }
+
+  const { data: matchRow } = await supabase
+    .from(TABLES.matches)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .maybeSingle();
+  if (!matchRow) {
+    return {
+      ok: false,
+      message: "Match non trouvé en base. Lancez d'abord un sync live.",
+      advice: null,
+      debug: emptyAdviceDebug(fixtureId),
+      persisted: false,
+      warnings: ["Match non trouvé en base."],
+    };
+  }
+
+  const fixture = rowToFixture(matchRow);
+
+  const { data: statsRow } = await supabase
+    .from(TABLES.statsSnapshots)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const statistics: NormalizedStatsPair = statsRow
+    ? {
+        home: statsRow.home_stats as NormalizedTeamStats,
+        away: statsRow.away_stats as NormalizedTeamStats,
+        hasData: true,
+      }
+    : emptyStatsPair();
+
+  const { data: eventRows } = await supabase
+    .from(TABLES.events)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("event_time", { ascending: true });
+  const events: NormalizedEvent[] = (eventRows ?? []).map((e: any) => ({
+    elapsed: e.event_time,
+    extra: null,
+    teamId: e.team_id,
+    teamName: e.team_name,
+    playerName: e.player_name,
+    assistName: e.assist_name,
+    type: e.type,
+    detail: e.detail,
+    comments: e.comments,
+  }));
+
+  const lineups = await loadStoredLineups(fixtureId);
+  const previousSnapshots = await loadStatsSnapshotPoints(fixtureId, 20);
+  const commentary = await loadCommentaryEvents(fixtureId);
+  const context = await loadStoredContext(fixtureId);
+  const freshnessSeconds = secondsSince(statsRow?.collected_at ?? matchRow.last_synced_at);
+
+  const advice = generateLiveBettingAdvice({
+    fixture,
+    statistics,
+    events,
+    lineups,
+    recentForm: context.recentForm,
+    h2h: context.h2h,
+    odds: ODDS_UNAVAILABLE,
+    previousSnapshots,
+    externalCommentaryEvents: commentary,
+    freshnessSeconds,
+  });
+
+  const persisted = await persistLiveAdvice(supabase, fixtureId, fixture, advice);
+  if (!persisted) {
+    warnings.push("Échec d'enregistrement du conseil (table live_advice_snapshots manquante ? Rejouer la migration 0002).");
+  }
+
+  const debug = buildAdviceDebug({
+    fixture,
+    statistics,
+    eventsCount: events.length,
+    lineupsCount: lineups.length,
+    previousSnapshotsCount: previousSnapshots.length,
+    liveAdvice: advice,
+    lastAdviceAt: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    message: `Analyse générée: action ${advice.action}.`,
+    advice,
+    debug,
+    persisted,
+    warnings,
+  };
+}
+
 /** Évalue le statut d'un conseil (validé/invalidé/inconclusif) si le match est fini. */
 function evaluateAdviceStatus(
   action: string | null,
@@ -1119,6 +1245,116 @@ async function loadStoredContext(
     recentForm: context.recentForm ?? { home: null, away: null },
     h2h: context.h2h ?? null,
   };
+}
+
+async function persistLiveAdvice(
+  supabase: any,
+  fixtureId: number,
+  fixture: NormalizedFixture,
+  advice: LiveBettingAdvice
+): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(TABLES.liveAdviceSnapshots).insert({
+      fixture_id: fixtureId,
+      minute: fixture.elapsed,
+      score_home: fixture.homeGoals,
+      score_away: fixture.awayGoals,
+      action: advice.action,
+      main_advice: advice.mainAdvice,
+      confidence: advice.confidence,
+      urgency: advice.urgency,
+      recommended_markets: advice.recommendedMarkets as any,
+      avoid_markets: advice.avoidMarkets as any,
+      risks: advice.risks as any,
+      invalidation_conditions: advice.recommendedMarkets.map((m) => m.invalidation) as any,
+      data_quality: advice.dataQuality as any,
+      raw_advice: advice as any,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+function buildAdviceDebug(args: {
+  fixture: NormalizedFixture;
+  statistics: NormalizedStatsPair | null;
+  eventsCount: number;
+  lineupsCount: number;
+  previousSnapshotsCount: number;
+  liveAdvice: LiveBettingAdvice | null;
+  lastAdviceAt: string | null;
+}): AdviceDebug {
+  const f = args.fixture;
+  const adv = args.liveAdvice;
+  let reason: string | null;
+  if (adv) {
+    reason =
+      adv.action === "WAIT" || adv.action === "AVOID" || adv.action === "INVALIDATED"
+        ? adv.dataQuality.warning ?? adv.mainAdvice
+        : `Action ${adv.action}.`;
+  } else {
+    reason = "Aucune analyse générée pour ce match.";
+  }
+  return {
+    fixtureFound: true,
+    fixtureId: f.fixtureId,
+    scoreHome: f.homeGoals,
+    scoreAway: f.awayGoals,
+    minute: f.elapsed,
+    statusShort: f.statusShort,
+    statusLong: f.statusLong,
+    hasStatistics: args.statistics?.hasData ?? false,
+    eventsCount: args.eventsCount,
+    lineupsCount: args.lineupsCount,
+    previousSnapshotsCount: args.previousSnapshotsCount,
+    liveAdviceFound: Boolean(adv),
+    lastAdviceAt: args.lastAdviceAt,
+    action: adv?.action ?? null,
+    reason,
+  };
+}
+
+function emptyAdviceDebug(fixtureId: number): AdviceDebug {
+  return {
+    fixtureFound: false,
+    fixtureId,
+    scoreHome: null,
+    scoreAway: null,
+    minute: null,
+    statusShort: null,
+    statusLong: null,
+    hasStatistics: false,
+    eventsCount: 0,
+    lineupsCount: 0,
+    previousSnapshotsCount: 0,
+    liveAdviceFound: false,
+    lastAdviceAt: null,
+    action: null,
+    reason: "Match non trouvé en base (lancer un sync).",
+  };
+}
+
+function emptyStatsPair(): NormalizedStatsPair {
+  const empty: NormalizedTeamStats = {
+    shotsOnGoal: null,
+    shotsOffGoal: null,
+    totalShots: null,
+    blockedShots: null,
+    shotsInsideBox: null,
+    shotsOutsideBox: null,
+    fouls: null,
+    cornerKicks: null,
+    offsides: null,
+    ballPossession: null,
+    yellowCards: null,
+    redCards: null,
+    goalkeeperSaves: null,
+    totalPasses: null,
+    passesAccurate: null,
+    passesPercent: null,
+  };
+  return { home: { ...empty }, away: { ...empty }, hasData: false };
 }
 
 function rowToFixture(row: any): NormalizedFixture {

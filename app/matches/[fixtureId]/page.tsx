@@ -8,6 +8,8 @@ import { EventsTimeline } from "@/components/EventsTimeline";
 import { LineupsPanel } from "@/components/LineupsPanel";
 import { RecentFormPanel } from "@/components/RecentFormPanel";
 import { LiveAdvicePanel } from "@/components/LiveAdvicePanel";
+import { GenerateAdviceButton } from "@/components/GenerateAdviceButton";
+import { AnalysisDebugPanel } from "@/components/AnalysisDebugPanel";
 import { CommentaryPanel } from "@/components/CommentaryPanel";
 import { AiAnalysisPanel } from "@/components/AiAnalysisPanel";
 import { SyncButton } from "@/components/SyncButton";
@@ -50,7 +52,7 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
     );
   }
 
-  const { fixture, statistics, events, lineups, analysis, liveAdvice, adviceHistory, commentary, recentForm, h2h, history } =
+  const { fixture, statistics, events, lineups, analysis, liveAdvice, adviceHistory, commentary, recentForm, h2h, history, debug } =
     detail;
 
   return (
@@ -63,28 +65,55 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">
-        <SyncButton endpoint={`/api/cron/sync-live/${fixtureId}`} label="Resync live" pendingLabel="Sync…" />
+        <SyncButton endpoint={`/api/cron/sync-live/${fixtureId}`} label="Resync live (API)" pendingLabel="Sync…" />
         <SyncButton
           endpoint={`/api/cron/sync-live/${fixtureId}?context=1`}
-          label="Resync + contexte (forme/H2H/cotes)"
+          label="Resync + contexte"
           pendingLabel="Sync…"
           variant="ghost"
         />
+        <GenerateAdviceButton fixtureId={fixtureId} />
       </div>
 
-      {/* CONSEIL LIVE — section principale, très visible */}
+      {/* CONSEIL LIVE — section principale, toujours visible */}
       {liveAdvice ? (
         <LiveAdvicePanel
           advice={liveAdvice}
+          homeName={fixture.home.name}
+          awayName={fixture.away.name}
+          scoreHome={fixture.homeGoals}
+          scoreAway={fixture.awayGoals}
+          minute={fixture.elapsed}
+          statusLong={fixture.statusLong}
           lastSyncedAt={detail.lastSyncedAt}
           freshnessSeconds={detail.freshnessSeconds}
         />
       ) : (
-        <div className="card card-pad text-sm text-slate-400">
-          Aucun conseil live disponible. Lancez un resync live pour générer l&apos;analyse de
-          l&apos;assistant.
+        <div className="card overflow-hidden">
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-4 sm:px-5">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-amber-300">
+              Analyse live du match
+            </div>
+            <h2 className="mt-1 text-lg font-bold text-slate-100">
+              {fixture.home.name} {fixture.homeGoals ?? "–"}-{fixture.awayGoals ?? "–"}{" "}
+              {fixture.away.name}
+            </h2>
+            <p className="mt-1 text-sm text-amber-200">Aucune analyse générée pour ce match.</p>
+          </div>
+          <div className="space-y-3 p-4 sm:p-5">
+            <p className="text-sm text-slate-300">
+              Les données du match sont en base ({debug.hasStatistics ? "stats présentes" : "stats absentes"},{" "}
+              {debug.eventsCount} événement(s), {debug.lineupsCount} compo(s)). Générez l&apos;analyse
+              maintenant — cela lit les dernières données stockées (aucun appel API) et crée le conseil
+              live.
+            </p>
+            <GenerateAdviceButton fixtureId={fixtureId} big />
+          </div>
         </div>
       )}
+
+      {/* Debug: données utilisées par l'analyse */}
+      <AnalysisDebugPanel debug={debug} />
 
       {/* Analyse détaillée (moteur) */}
       {analysis ? (

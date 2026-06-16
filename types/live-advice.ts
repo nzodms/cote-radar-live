@@ -49,6 +49,13 @@ export interface AvoidMarket {
   reason: string;
 }
 
+/** Marché déjà résolu par le score (over 1.5/2.5, BTTS…) — à NE PAS conseiller. */
+export interface ResolvedMarket {
+  market: string;
+  label: string;
+  note: string;
+}
+
 export interface AdviceRisk {
   type: string;
   severity: AdviceSeverity;
@@ -100,14 +107,37 @@ export interface LiveBettingAdvice {
   confidence: AdviceConfidence;
   urgency: Urgency;
   dominantTeam: string | null;
+  /** "Ce que je ferais maintenant" — section la plus importante, langage humain. */
+  whatIWouldDoNow: string;
   momentum: MomentumSummary;
   contextComparison: ContextComparison;
   recommendedMarkets: RecommendedMarket[];
   avoidMarkets: AvoidMarket[];
+  /** Marchés déjà passés (résolus par le score), affichés à part. */
+  resolvedMarkets: ResolvedMarket[];
   risks: AdviceRisk[];
   nextCheck: NextCheck;
   dataQuality: AdviceDataQuality;
   finalVerdict: string;
+}
+
+/** Données réellement utilisées par l'analyse (panneau debug). */
+export interface AdviceDebug {
+  fixtureFound: boolean;
+  fixtureId: number;
+  scoreHome: number | null;
+  scoreAway: number | null;
+  minute: number | null;
+  statusShort: string | null;
+  statusLong: string | null;
+  hasStatistics: boolean;
+  eventsCount: number;
+  lineupsCount: number;
+  previousSnapshotsCount: number;
+  liveAdviceFound: boolean;
+  lastAdviceAt: string | null;
+  action: string | null;
+  reason: string | null;
 }
 
 /* ------------------------------------------------------------------ */
