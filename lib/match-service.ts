@@ -882,6 +882,196 @@ export async function loadSignalHistory(limit = 100): Promise<SignalHistoryRow[]
 }
 
 /* ========================================================================
+ *  Building blocks pour le live monitor (collecte sélective, 0 duplication)
+ * ===================================================================== */
+
+export async function loadLastMatchState(fixtureId: number): Promise<{
+  homeGoals: number | null;
+  awayGoals: number | null;
+  elapsed: number | null;
+  statusShort: string | null;
+  statusLong: string | null;
+} | null> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from(TABLES.matches)
+    .select("home_goals,away_goals,elapsed,status_short,status_long")
+    .eq("fixture_id", fixtureId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    homeGoals: data.home_goals ?? null,
+    awayGoals: data.away_goals ?? null,
+    elapsed: data.elapsed ?? null,
+    statusShort: data.status_short ?? null,
+    statusLong: data.status_long ?? null,
+  };
+}
+
+export async function loadStoredStatistics(fixtureId: number): Promise<{
+  statistics: NormalizedStatsPair | null;
+  elapsed: number | null;
+  collectedAt: string | null;
+}> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return { statistics: null, elapsed: null, collectedAt: null };
+  const { data } = await supabase
+    .from(TABLES.statsSnapshots)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return { statistics: null, elapsed: null, collectedAt: null };
+  return {
+    statistics: {
+      home: data.home_stats as NormalizedTeamStats,
+      away: data.away_stats as NormalizedTeamStats,
+      hasData: true,
+    },
+    elapsed: data.elapsed ?? null,
+    collectedAt: data.collected_at ?? null,
+  };
+}
+
+export async function loadStoredEvents(fixtureId: number): Promise<NormalizedEvent[]> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from(TABLES.events)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("event_time", { ascending: true });
+  return (data ?? []).map((e: any) => ({
+    elapsed: e.event_time,
+    extra: null,
+    teamId: e.team_id,
+    teamName: e.team_name,
+    playerName: e.player_name,
+    assistName: e.assist_name,
+    type: e.type,
+    detail: e.detail,
+    comments: e.comments,
+  }));
+}
+
+export async function loadLastEventsAt(fixtureId: number): Promise<string | null> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from(TABLES.events)
+    .select("created_at")
+    .eq("fixture_id", fixtureId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.created_at ?? null;
+}
+
+export async function upsertMatchFromFixture(fixture: NormalizedFixture, raw?: any): Promise<boolean> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return false;
+  const row: any = {
+    fixture_id: fixture.fixtureId,
+    league_id: fixture.leagueId,
+    league_name: fixture.leagueName,
+    season: fixture.season,
+    round: fixture.round,
+    group_name: fixture.groupName,
+    home_team_id: fixture.home.id,
+    home_team_name: fixture.home.name,
+    home_team_logo: fixture.home.logo,
+    away_team_id: fixture.away.id,
+    away_team_name: fixture.away.name,
+    away_team_logo: fixture.away.logo,
+    kickoff_at: fixture.kickoffAt,
+    status_short: fixture.statusShort,
+    status_long: fixture.statusLong,
+    elapsed: fixture.elapsed,
+    home_goals: fixture.homeGoals,
+    away_goals: fixture.awayGoals,
+    venue_name: fixture.venueName,
+    venue_city: fixture.venueCity,
+    last_synced_at: new Date().toISOString(),
+  };
+  if (raw !== undefined) row.raw_fixture = raw;
+  const { error } = await supabase.from(TABLES.matches).upsert(row, { onConflict: "fixture_id" });
+  return !error;
+}
+
+export async function insertStatsSnapshotRow(
+  fixtureId: number,
+  statistics: NormalizedStatsPair,
+  rawStats: unknown,
+  elapsed: number | null
+): Promise<boolean> {
+  const supabase = getServiceSupabase();
+  if (!supabase || !statistics.hasData) return false;
+  const { error } = await supabase.from(TABLES.statsSnapshots).insert({
+    fixture_id: fixtureId,
+    elapsed,
+    home_stats: statistics.home as any,
+    away_stats: statistics.away as any,
+    raw_statistics: (rawStats ?? null) as any,
+  });
+  return !error;
+}
+
+export async function replaceEventRows(
+  fixtureId: number,
+  events: NormalizedEvent[],
+  rawEvents?: unknown[]
+): Promise<number> {
+  const supabase = getServiceSupabase();
+  if (!supabase || events.length === 0) return 0;
+  await supabase.from(TABLES.events).delete().eq("fixture_id", fixtureId);
+  const rows = events.map((e, i) => ({
+    fixture_id: fixtureId,
+    event_time: e.elapsed,
+    team_id: e.teamId,
+    team_name: e.teamName,
+    player_name: e.playerName,
+    assist_name: e.assistName,
+    type: e.type,
+    detail: e.detail,
+    comments: e.comments,
+    raw_event: (rawEvents?.[i] ?? e) as any,
+  }));
+  const { error } = await supabase.from(TABLES.events).insert(rows);
+  return error ? 0 : rows.length;
+}
+
+export async function replaceLineupRows(
+  fixtureId: number,
+  lineups: NormalizedLineup[]
+): Promise<number> {
+  const supabase = getServiceSupabase();
+  if (!supabase || lineups.length === 0) return 0;
+  await supabase.from(TABLES.lineups).delete().eq("fixture_id", fixtureId);
+  const rows = lineups.map((l) => ({
+    fixture_id: fixtureId,
+    team_id: l.teamId,
+    team_name: l.teamName,
+    formation: l.formation,
+    coach_name: l.coachName,
+    raw_lineup: l as any,
+  }));
+  const { error } = await supabase.from(TABLES.lineups).insert(rows);
+  return error ? 0 : rows.length;
+}
+
+export async function persistAdvice(
+  fixtureId: number,
+  fixture: NormalizedFixture,
+  advice: LiveBettingAdvice
+): Promise<boolean> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return false;
+  return persistLiveAdvice(supabase, fixtureId, fixture, advice);
+}
+
+/* ========================================================================
  *  Helpers internes
  * ===================================================================== */
 
@@ -906,7 +1096,7 @@ async function toListItem(row: any): Promise<MatchListItem> {
 /* ----- Loaders V2 (snapshots fenêtres, conseils live, commentaires) ----- */
 
 /** Charge les derniers points de stats (avec minute) pour l'analyse par fenêtres. */
-async function loadStatsSnapshotPoints(fixtureId: number, limit = 12): Promise<StatsSnapshotPoint[]> {
+export async function loadStatsSnapshotPoints(fixtureId: number, limit = 12): Promise<StatsSnapshotPoint[]> {
   const supabase = getServiceSupabase();
   if (!supabase) return [];
   const { data } = await supabase
@@ -924,7 +1114,7 @@ async function loadStatsSnapshotPoints(fixtureId: number, limit = 12): Promise<S
 }
 
 /** Charge les événements de commentaires (source secondaire) récents. */
-async function loadCommentaryEvents(fixtureId: number): Promise<ExternalCommentaryEvent[]> {
+export async function loadCommentaryEvents(fixtureId: number): Promise<ExternalCommentaryEvent[]> {
   const supabase = getServiceSupabase();
   if (!supabase) return [];
   const { data } = await supabase
@@ -1218,7 +1408,7 @@ async function hasStoredLineups(fixtureId: number): Promise<boolean> {
   return (count ?? 0) > 0;
 }
 
-async function loadStoredLineups(fixtureId: number): Promise<NormalizedLineup[]> {
+export async function loadStoredLineups(fixtureId: number): Promise<NormalizedLineup[]> {
   const supabase = getServiceSupabase();
   if (!supabase) return [];
   const { data } = await supabase.from(TABLES.lineups).select("*").eq("fixture_id", fixtureId);
@@ -1236,7 +1426,7 @@ async function loadStoredLineups(fixtureId: number): Promise<NormalizedLineup[]>
   });
 }
 
-async function loadStoredContext(
+export async function loadStoredContext(
   fixtureId: number
 ): Promise<{ recentForm: { home: RecentForm | null; away: RecentForm | null }; h2h: H2HSummary | null }> {
   const latest = await loadLatestAnalysisRow(fixtureId);

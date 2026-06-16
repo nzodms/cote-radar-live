@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx tests/live-advice.test.ts"
+    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

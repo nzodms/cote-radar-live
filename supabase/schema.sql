@@ -236,3 +236,31 @@ create index if not exists idx_os_collected on odds_snapshots (fixture_id, colle
 alter table live_advice_snapshots enable row level security;
 alter table external_live_commentary_events enable row level security;
 alter table odds_snapshots enable row level security;
+
+-- ============================================================================
+-- V3 — Surveillance live continue (équivalent à migrations/0003_live_monitor.sql)
+-- ============================================================================
+create table if not exists live_watch_sessions (
+  id uuid primary key default gen_random_uuid(),
+  fixture_id bigint not null,
+  status text default 'active',
+  started_at timestamptz default now(),
+  stopped_at timestamptz,
+  poll_interval_seconds int,
+  last_polled_at timestamptz,
+  next_poll_at timestamptz,
+  api_calls_used int default 0,
+  last_error text,
+  mode text,
+  last_alert_at timestamptz,
+  last_alert_signature text,
+  last_alert_text text
+);
+
+create index if not exists idx_lws_status on live_watch_sessions (status);
+create index if not exists idx_lws_next_poll on live_watch_sessions (status, next_poll_at);
+create unique index if not exists idx_lws_active_fixture
+  on live_watch_sessions (fixture_id)
+  where status = 'active';
+
+alter table live_watch_sessions enable row level security;

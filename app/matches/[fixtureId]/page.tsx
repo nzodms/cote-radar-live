@@ -10,6 +10,7 @@ import { RecentFormPanel } from "@/components/RecentFormPanel";
 import { LiveAdvicePanel } from "@/components/LiveAdvicePanel";
 import { GenerateAdviceButton } from "@/components/GenerateAdviceButton";
 import { AnalysisDebugPanel } from "@/components/AnalysisDebugPanel";
+import { LiveMonitorPanel } from "@/components/LiveMonitorPanel";
 import { CommentaryPanel } from "@/components/CommentaryPanel";
 import { AiAnalysisPanel } from "@/components/AiAnalysisPanel";
 import { SyncButton } from "@/components/SyncButton";
@@ -111,6 +112,9 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
           </div>
         </div>
       )}
+
+      {/* Surveillance live continue */}
+      <LiveMonitorPanel fixtureId={fixtureId} />
 
       {/* Debug: données utilisées par l'analyse */}
       <AnalysisDebugPanel debug={debug} />

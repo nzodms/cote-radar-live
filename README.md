@@ -314,6 +314,41 @@ ajoute la colonne `elapsed` aux snapshots stats et les tables `live_advice_snaps
 
 ---
 
+## 🛰️ Surveillance live continue (V3) — quota intelligent + alertes WhatsApp
+
+Analyse le match **en continu** pendant qu'il est live, sans spammer l'API.
+
+**Sans boucle infinie (Vercel-friendly)** : une session de watch par fixture
+(`live_watch_sessions`), et un endpoint **tick** qui poll les sessions « dues ».
+
+- `lib/live-monitor/scheduler.ts` — sessions (start/stop/status) + `runMonitorTick()` (cycle court)
+- `lib/live-monitor/polling-strategy.ts` — `decidePollPlan()` (quota-aware)
+- `lib/live-monitor/change-detector.ts` — `detectMatchChanges()` + `shouldSendWhatsAppAlert()`
+- `app/api/cron/live-monitor` — un tick pour toutes les sessions dues (cron)
+- `app/api/cron/watch-fixture/[id]?action=start|stop|tick|status` — piloté par l'UI
+
+**Stratégie de quota** :
+- Free : fixture/stats ~3 min, events ~6 min, lineups **une fois**.
+- Économie (quota restant < 15) : fixture 5 min, stats 10 min, events **seulement si le score change**.
+- Payant (`SAFE_FREE_PLAN=false`) : fixture/stats/events ~60 s.
+- On (re)collecte stats/events aussi sur **changement** (but, statut) ou si l'action est WATCH/SIGNAL.
+- Quota épuisé (`MAX_API_CALLS_PER_DAY`) : aucune requête, l'advice est régénéré depuis la base.
+
+**Alertes WhatsApp** (optionnelles, `ENABLE_WHATSAPP_ALERTS`, provider webhook/twilio/meta) :
+envoyées **uniquement** sur changement notable (WAIT→WATCH, WATCH→SIGNAL, →INVALIDATED, but,
+carton rouge, marché résolu, bascule de momentum). **Anti-spam** : pas deux alertes similaires en
+moins de `WHATSAPP_ALERT_MIN_INTERVAL_SECONDS` (3 min par défaut).
+
+**UI** (`/matches/[fixtureId]`, panneau « Surveillance live ») : Démarrer / Arrêter / **Run one
+monitor tick**, statut, prochain poll, calls restants, dernier poll, dernière analyse, dernière alerte.
+
+**Cron en prod** : Vercel hobby ne fait que du quotidien. Pour du continu, appeler
+`/api/cron/live-monitor` via un cron externe (ex. cron-job.org) toutes les ~3 min, ou Vercel Pro.
+Variables : `ENABLE_LIVE_MONITOR`, `LIVE_POLL_INTERVAL_SECONDS`, `STATS_POLL_INTERVAL_SECONDS`,
+`EVENTS_POLL_INTERVAL_SECONDS`, `MAX_API_CALLS_PER_DAY`. Migration : `0003_live_monitor.sql`.
+
+---
+
 ## 💸 Respecter le plan Free (100 requêtes/jour)
 
 - Les **pages lisent la base** (dashboard, matchs, détail, historique) → **0 appel API**.

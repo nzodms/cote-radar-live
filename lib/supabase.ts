@@ -52,4 +52,5 @@ export const TABLES = {
   liveAdviceSnapshots: "live_advice_snapshots",
   externalCommentary: "external_live_commentary_events",
   oddsSnapshots: "odds_snapshots",
+  watchSessions: "live_watch_sessions",
 } as const;
