@@ -49,4 +49,7 @@ export const TABLES = {
   analysisSnapshots: "analysis_snapshots",
   apiUsageLogs: "api_usage_logs",
   affiliateClicks: "affiliate_clicks",
+  liveAdviceSnapshots: "live_advice_snapshots",
+  externalCommentary: "external_live_commentary_events",
+  oddsSnapshots: "odds_snapshots",
 } as const;

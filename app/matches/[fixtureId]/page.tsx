@@ -7,11 +7,14 @@ import { RiskPanel } from "@/components/RiskPanel";
 import { EventsTimeline } from "@/components/EventsTimeline";
 import { LineupsPanel } from "@/components/LineupsPanel";
 import { RecentFormPanel } from "@/components/RecentFormPanel";
+import { LiveAdvicePanel } from "@/components/LiveAdvicePanel";
+import { CommentaryPanel } from "@/components/CommentaryPanel";
+import { AiAnalysisPanel } from "@/components/AiAnalysisPanel";
 import { SyncButton } from "@/components/SyncButton";
 import { DataFreshnessBadge } from "@/components/DataFreshnessBadge";
 import { loadMatchDetail } from "@/lib/match-service";
 import { cn, formatFreshness, formatKickoff } from "@/lib/utils";
-import { confidenceLabelFr, signalLabelFr, signalToneClass } from "@/lib/ui";
+import { actionLabelFr, actionToneClass, confidenceLabelFr, signalLabelFr, signalToneClass } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +50,8 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
     );
   }
 
-  const { fixture, statistics, events, lineups, analysis, recentForm, h2h, history } = detail;
+  const { fixture, statistics, events, lineups, analysis, liveAdvice, adviceHistory, commentary, recentForm, h2h, history } =
+    detail;
 
   return (
     <div className="space-y-4">
@@ -68,7 +72,21 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
         />
       </div>
 
-      {/* Verdict prudent */}
+      {/* CONSEIL LIVE — section principale, très visible */}
+      {liveAdvice ? (
+        <LiveAdvicePanel
+          advice={liveAdvice}
+          lastSyncedAt={detail.lastSyncedAt}
+          freshnessSeconds={detail.freshnessSeconds}
+        />
+      ) : (
+        <div className="card card-pad text-sm text-slate-400">
+          Aucun conseil live disponible. Lancez un resync live pour générer l&apos;analyse de
+          l&apos;assistant.
+        </div>
+      )}
+
+      {/* Analyse détaillée (moteur) */}
       {analysis ? (
         <div className="card card-pad">
           <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -127,6 +145,35 @@ export default async function MatchDetailPage({ params }: { params: { fixtureId:
         away={recentForm.away}
         h2h={h2h}
       />
+
+      <CommentaryPanel events={commentary} />
+
+      <AiAnalysisPanel fixtureId={fixtureId} />
+
+      {/* Historique des conseils live (ce match) */}
+      <div className="card card-pad">
+        <div className="mb-3 section-title">Historique des conseils live (ce match)</div>
+        {adviceHistory.length === 0 ? (
+          <div className="text-sm text-slate-400">Aucun conseil enregistré pour l&apos;instant.</div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {adviceHistory.map((a) => (
+              <div key={a.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-slate-200">{a.mainAdvice}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {formatKickoff(a.collectedAt)} · {a.minute ?? "—"}&apos; · score {a.scoreHome ?? "—"}-
+                    {a.scoreAway ?? "—"}
+                  </div>
+                </div>
+                <span className={cn("badge shrink-0", actionToneClass(a.action))}>
+                  {actionLabelFr(a.action)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Historique des signaux générés pendant le match */}
       <div className="card card-pad">

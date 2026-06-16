@@ -3,7 +3,7 @@ import type { MatchListItem } from "@/lib/match-service";
 import { TeamLogo } from "./TeamLogo";
 import { DataFreshnessBadge } from "./DataFreshnessBadge";
 import { cn, formatKickoff, isLivePhase } from "@/lib/utils";
-import { phaseLabelFr, phaseToneClass, signalToneClass } from "@/lib/ui";
+import { actionLabelFr, actionToneClass, phaseLabelFr, phaseToneClass, signalToneClass } from "@/lib/ui";
 
 function MomentumMini({ home, away }: { home: number | null; away: number | null }) {
   if (home === null || away === null) {
@@ -72,6 +72,17 @@ export function MatchCard({ item }: { item: MatchListItem }) {
       </div>
 
       <MomentumMini home={item.homeMomentum} away={item.awayMomentum} />
+
+      {item.adviceAction && (
+        <div className="flex items-center gap-2">
+          <span className={cn("badge shrink-0", actionToneClass(item.adviceAction))}>
+            {actionLabelFr(item.adviceAction)}
+          </span>
+          {item.adviceMainText && (
+            <span className="truncate text-[11px] text-slate-500">{item.adviceMainText}</span>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">

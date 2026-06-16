@@ -3,6 +3,8 @@ import { hasApiKey } from "@/lib/api-football";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { getApiUsageStats } from "@/lib/api-usage";
 import { getWorldCupConfig } from "@/lib/world-cup-filter";
+import { getAiStatus } from "@/lib/ai";
+import { isPublicCommentaryEnabled } from "@/lib/scrapers/public-live-commentary";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +44,33 @@ export default async function SettingsPage() {
   const supabaseOk = isSupabaseConfigured();
   const refreshInterval = process.env.API_REFRESH_INTERVAL_SECONDS ?? "120";
   const safeFreePlan = (process.env.SAFE_FREE_PLAN ?? "true").toLowerCase() === "true";
+  const ai = getAiStatus();
+  const commentaryEnabled = isPublicCommentaryEnabled();
 
   return (
     <div className="space-y-4">
+      {/* Intégrations V2 */}
+      <div className="card card-pad">
+        <div className="mb-2 section-title">Intégrations (assistant live)</div>
+        <StatusRow label="Moteur Live Advice (maison)" value="Actif" ok={true} />
+        <StatusRow
+          label="IA optionnelle (ENABLE_AI_ANALYSIS)"
+          value={ai.enabled ? `Activée · ${ai.provider}` : "Désactivée"}
+          ok={ai.enabled ? true : null}
+        />
+        <StatusRow label="Modèle IA configuré" value={ai.model} />
+        <StatusRow
+          label="Commentaires publics (source secondaire)"
+          value={commentaryEnabled ? "Activés" : "Désactivés"}
+          ok={commentaryEnabled ? true : null}
+        />
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          Le cerveau principal reste le moteur maison (données + scoring + règles). L&apos;IA, si
+          activée, ne fait que reformuler le conseil calculé. La source secondaire n&apos;enrichit
+          jamais un signal fort à elle seule.
+        </p>
+      </div>
+
       {/* Configuration */}
       <div className="card card-pad">
         <div className="mb-2 section-title">Configuration</div>

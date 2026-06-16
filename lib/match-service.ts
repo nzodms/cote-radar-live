@@ -19,6 +19,8 @@ import {
   getTeamLastFixtures,
 } from "./api-football";
 import { analyzeMatch, type AnalyzeMatchInput } from "./analyzer";
+import { generateLiveBettingAdvice } from "./live-advice";
+import { buildOddsSnapshots } from "./odds-engine";
 import { getServiceSupabase, TABLES } from "./supabase";
 import {
   filterWorldCupFixtures,
@@ -48,6 +50,12 @@ import type {
   NormalizedTeamStats,
   RecentForm,
 } from "@/types/match";
+import type {
+  LiveAdviceHistoryEntry,
+  LiveBettingAdvice,
+  StatsSnapshotPoint,
+} from "@/types/live-advice";
+import type { ExternalCommentaryEvent } from "@/types/commentary";
 
 export interface MatchListItem {
   fixture: NormalizedFixture;
@@ -56,6 +64,9 @@ export interface MatchListItem {
   signalLevel: string | null;
   bestSignalLabel: string | null;
   hasHighRisk: boolean;
+  /** Action de l'assistant live (WAIT/WATCH/SIGNAL/AVOID/INVALIDATED). */
+  adviceAction: string | null;
+  adviceMainText: string | null;
   lastSyncedAt: string | null;
   freshnessSeconds: number | null;
 }
@@ -78,6 +89,7 @@ export interface SyncLiveResult {
   message: string;
   fixture: NormalizedFixture | null;
   analysis: MatchAnalysis | null;
+  liveAdvice: LiveBettingAdvice | null;
   persisted: boolean;
   stored: {
     fixture: boolean;
@@ -85,6 +97,8 @@ export interface SyncLiveResult {
     events: number;
     lineups: number;
     analysisSnapshot: boolean;
+    liveAdviceSnapshot: boolean;
+    oddsSnapshots: number;
   };
   apiCalls: Array<{ endpoint: string; ok: boolean; note?: string }>;
   warnings: string[];
@@ -96,6 +110,9 @@ export interface MatchDetailResult {
   events: NormalizedEvent[];
   lineups: NormalizedLineup[];
   analysis: MatchAnalysis | null;
+  liveAdvice: LiveBettingAdvice | null;
+  adviceHistory: LiveAdviceHistoryEntry[];
+  commentary: ExternalCommentaryEvent[];
   recentForm: { home: RecentForm | null; away: RecentForm | null };
   h2h: H2HSummary | null;
   history: AnalysisHistoryEntry[];
@@ -209,8 +226,17 @@ export async function syncLiveFixture(
       message: "Fixture introuvable via l'API.",
       fixture: null,
       analysis: null,
+      liveAdvice: null,
       persisted,
-      stored: { fixture: false, statsSnapshot: false, events: 0, lineups: 0, analysisSnapshot: false },
+      stored: {
+        fixture: false,
+        statsSnapshot: false,
+        events: 0,
+        lineups: 0,
+        analysisSnapshot: false,
+        liveAdviceSnapshot: false,
+        oddsSnapshots: 0,
+      },
       apiCalls,
       warnings,
     };
@@ -226,8 +252,17 @@ export async function syncLiveFixture(
       message: `Match hors Coupe du monde (league ${af.league.id} - ${af.league.name}). Ignoré.`,
       fixture: normalizeFixture(af),
       analysis: null,
+      liveAdvice: null,
       persisted,
-      stored: { fixture: false, statsSnapshot: false, events: 0, lineups: 0, analysisSnapshot: false },
+      stored: {
+        fixture: false,
+        statsSnapshot: false,
+        events: 0,
+        lineups: 0,
+        analysisSnapshot: false,
+        liveAdviceSnapshot: false,
+        oddsSnapshots: 0,
+      },
       apiCalls,
       warnings,
     };
@@ -302,7 +337,11 @@ export async function syncLiveFixture(
     }
   }
 
-  // 7) Analyse
+  // 7) Contexte temporel: snapshots précédents (fenêtres 5/10 min) + commentaires.
+  const previousSnapshots = await loadStatsSnapshotPoints(fixtureId, 12);
+  const commentary = await loadCommentaryEvents(fixtureId);
+
+  // 8) Analyse maison + Conseil live actionnable.
   const freshnessSeconds = 0; // on vient de récupérer les données
   const analysisInput: AnalyzeMatchInput = {
     fixture,
@@ -315,14 +354,28 @@ export async function syncLiveFixture(
     freshnessSeconds,
   };
   const analysis = analyzeMatch(analysisInput);
+  const liveAdvice = generateLiveBettingAdvice({
+    fixture,
+    statistics,
+    events,
+    lineups,
+    recentForm,
+    h2h,
+    odds,
+    previousSnapshots,
+    externalCommentaryEvents: commentary,
+    freshnessSeconds,
+  });
 
-  // 8) Persistance
+  // 9) Persistance
   const stored = {
     fixture: false,
     statsSnapshot: false,
     events: 0,
     lineups: 0,
     analysisSnapshot: false,
+    liveAdviceSnapshot: false,
+    oddsSnapshots: 0,
   };
 
   if (supabase) {
@@ -365,6 +418,7 @@ export async function syncLiveFixture(
     if (statistics.hasData) {
       const { error } = await supabase.from(TABLES.statsSnapshots).insert({
         fixture_id: fixtureId,
+        elapsed: fixture.elapsed,
         home_stats: statistics.home as any,
         away_stats: statistics.away as any,
         raw_statistics: rawStats as any,
@@ -430,6 +484,47 @@ export async function syncLiveFixture(
       if (error) warnings.push(`Insert analyse échoué: ${error.message}`);
       else stored.analysisSnapshot = true;
     }
+
+    // 9.f conseil live (assistant)
+    {
+      const { error } = await supabase.from(TABLES.liveAdviceSnapshots).insert({
+        fixture_id: fixtureId,
+        minute: fixture.elapsed,
+        score_home: fixture.homeGoals,
+        score_away: fixture.awayGoals,
+        action: liveAdvice.action,
+        main_advice: liveAdvice.mainAdvice,
+        confidence: liveAdvice.confidence,
+        urgency: liveAdvice.urgency,
+        recommended_markets: liveAdvice.recommendedMarkets as any,
+        avoid_markets: liveAdvice.avoidMarkets as any,
+        risks: liveAdvice.risks as any,
+        invalidation_conditions: liveAdvice.recommendedMarkets.map((m) => m.invalidation) as any,
+        data_quality: liveAdvice.dataQuality as any,
+        raw_advice: liveAdvice as any,
+      });
+      if (error) warnings.push(`Insert conseil live échoué: ${error.message}`);
+      else stored.liveAdviceSnapshot = true;
+    }
+
+    // 9.g snapshots de cotes (préparation value / affiliation)
+    if (odds.available) {
+      const oddsRows = buildOddsSnapshots(fixtureId, odds).map((o) => ({
+        fixture_id: o.fixtureId,
+        source: o.source,
+        bookmaker: o.bookmaker,
+        market: o.market,
+        selection: o.selection,
+        odd: o.odd,
+        implied_probability: o.impliedProbability,
+        raw_odds: o as any,
+      }));
+      if (oddsRows.length > 0) {
+        const { error } = await supabase.from(TABLES.oddsSnapshots).insert(oddsRows);
+        if (error) warnings.push(`Insert cotes échoué: ${error.message}`);
+        else stored.oddsSnapshots = oddsRows.length;
+      }
+    }
   }
 
   return {
@@ -441,6 +536,7 @@ export async function syncLiveFixture(
     } (${fixture.statusLong}).`,
     fixture,
     analysis,
+    liveAdvice,
     persisted,
     stored,
     apiCalls,
@@ -505,6 +601,9 @@ export async function loadMatchDetail(fixtureId: number): Promise<MatchDetailRes
     events: [],
     lineups: [],
     analysis: null,
+    liveAdvice: null,
+    adviceHistory: [],
+    commentary: [],
     recentForm: { home: null, away: null },
     h2h: null,
     history: [],
@@ -595,12 +694,20 @@ export async function loadMatchDetail(fixtureId: number): Promise<MatchDetailRes
     risks: r.risks ?? [],
   }));
 
+  // conseil live (dernier) + historique conseils + commentaires
+  const liveAdvice = await loadLatestLiveAdvice(fixtureId);
+  const adviceHistory = await loadFixtureAdviceHistory(fixtureId, matchRow);
+  const commentary = await loadCommentaryEvents(fixtureId);
+
   return {
     fixture,
     statistics,
     events,
     lineups,
     analysis,
+    liveAdvice,
+    adviceHistory,
+    commentary,
     recentForm,
     h2h,
     history,
@@ -777,6 +884,7 @@ export async function loadSignalHistory(limit = 100): Promise<SignalHistoryRow[]
 async function toListItem(row: any): Promise<MatchListItem> {
   const latest = await loadLatestAnalysisRow(row.fixture_id);
   const risks = (latest?.risks as RiskItem[] | undefined) ?? [];
+  const advice = await loadLatestLiveAdviceRow(row.fixture_id);
   return {
     fixture: rowToFixture(row),
     homeMomentum: latest?.home_momentum ?? null,
@@ -784,9 +892,181 @@ async function toListItem(row: any): Promise<MatchListItem> {
     signalLevel: latest?.signal_level ?? null,
     bestSignalLabel: (latest?.raw_analysis as any)?.bestSignalLabel ?? null,
     hasHighRisk: Array.isArray(risks) && risks.some((r) => r?.severity === "high"),
+    adviceAction: advice?.action ?? null,
+    adviceMainText: advice?.main_advice ?? null,
     lastSyncedAt: row.last_synced_at ?? null,
     freshnessSeconds: secondsSince(row.last_synced_at),
   };
+}
+
+/* ----- Loaders V2 (snapshots fenêtres, conseils live, commentaires) ----- */
+
+/** Charge les derniers points de stats (avec minute) pour l'analyse par fenêtres. */
+async function loadStatsSnapshotPoints(fixtureId: number, limit = 12): Promise<StatsSnapshotPoint[]> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from(TABLES.statsSnapshots)
+    .select("collected_at,elapsed,home_stats,away_stats")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []).map((r: any) => ({
+    collectedAt: r.collected_at,
+    elapsed: r.elapsed ?? null,
+    home: r.home_stats as NormalizedTeamStats,
+    away: r.away_stats as NormalizedTeamStats,
+  }));
+}
+
+/** Charge les événements de commentaires (source secondaire) récents. */
+async function loadCommentaryEvents(fixtureId: number): Promise<ExternalCommentaryEvent[]> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from(TABLES.externalCommentary)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(100);
+  const rows = (data ?? []) as any[];
+  return rows.map((r: any) => ({
+    minute: r.event_minute ?? null,
+    timeLabel: r.event_time_label ?? null,
+    teamName: r.team_name ?? null,
+    playerName: r.player_name ?? null,
+    eventType: (r.event_type ?? "unknown") as ExternalCommentaryEvent["eventType"],
+    rawTitle: r.raw_title ?? "",
+    rawDescription: r.raw_description ?? "",
+    normalizedImpact: (r.normalized_impact ?? "low") as ExternalCommentaryEvent["normalizedImpact"],
+  }));
+}
+
+async function loadLatestLiveAdviceRow(fixtureId: number): Promise<any | null> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from(TABLES.liveAdviceSnapshots)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function loadLatestLiveAdvice(fixtureId: number): Promise<LiveBettingAdvice | null> {
+  const row = await loadLatestLiveAdviceRow(fixtureId);
+  if (!row) return null;
+  return (row.raw_advice as LiveBettingAdvice) ?? null;
+}
+
+/** Évalue le statut d'un conseil (validé/invalidé/inconclusif) si le match est fini. */
+function evaluateAdviceStatus(
+  action: string | null,
+  markets: { market: string }[],
+  match: { home_goals: number | null; away_goals: number | null } | undefined,
+  finished: boolean
+): LiveAdviceHistoryEntry["status"] {
+  if (action === "INVALIDATED") return "invalidated";
+  if (!match || !finished || match.home_goals === null || match.away_goals === null) return "pending";
+  if (action === "WAIT" || action === "AVOID") return "inconclusive";
+
+  const primary = markets[0]?.market ?? null;
+  if (!primary) return "inconclusive";
+  const h = match.home_goals;
+  const a = match.away_goals;
+  const total = h + a;
+  switch (primary) {
+    case "over_1_5":
+      return total >= 2 ? "validated" : "invalidated";
+    case "over_2_5":
+      return total >= 3 ? "validated" : "invalidated";
+    case "btts":
+      return h >= 1 && a >= 1 ? "validated" : "invalidated";
+    case "home_win_live":
+    case "double_chance_home_draw":
+      return h >= a ? "validated" : "invalidated";
+    case "away_win_live":
+    case "double_chance_away_draw":
+      return a >= h ? "validated" : "invalidated";
+    default:
+      return "inconclusive";
+  }
+}
+
+function mapAdviceRow(r: any, match?: any): LiveAdviceHistoryEntry {
+  const markets = (r.recommended_markets ?? []) as Array<{ market: string }>;
+  const finished = match ? mapStatusToPhase(match.status_short) === "finished" : false;
+  return {
+    id: r.id,
+    fixtureId: r.fixture_id,
+    collectedAt: r.collected_at,
+    minute: r.minute ?? null,
+    scoreHome: r.score_home ?? null,
+    scoreAway: r.score_away ?? null,
+    action: (r.action ?? "WAIT") as LiveAdviceHistoryEntry["action"],
+    mainAdvice: r.main_advice ?? "",
+    confidence: r.confidence ?? null,
+    urgency: r.urgency ?? null,
+    recommendedMarkets: r.recommended_markets ?? [],
+    avoidMarkets: r.avoid_markets ?? [],
+    risks: r.risks ?? [],
+    status: evaluateAdviceStatus(r.action ?? null, markets, match, finished),
+  };
+}
+
+async function loadFixtureAdviceHistory(
+  fixtureId: number,
+  matchRow: any,
+  limit = 50
+): Promise<LiveAdviceHistoryEntry[]> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from(TABLES.liveAdviceSnapshots)
+    .select("*")
+    .eq("fixture_id", fixtureId)
+    .order("collected_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []).map((r: any) => mapAdviceRow(r, matchRow));
+}
+
+export interface LiveAdviceHistoryRow extends LiveAdviceHistoryEntry {
+  matchLabel: string;
+  finalScore: string | null;
+}
+
+/** Historique global des conseils live (page /history). */
+export async function loadLiveAdviceHistory(limit = 150): Promise<LiveAdviceHistoryRow[]> {
+  const supabase = getServiceSupabase();
+  if (!supabase) return [];
+  const { data } = await supabase
+    .from(TABLES.liveAdviceSnapshots)
+    .select("*")
+    .order("collected_at", { ascending: false })
+    .limit(limit);
+  const rows = (data ?? []) as any[];
+  if (rows.length === 0) return [];
+
+  const ids = Array.from(new Set(rows.map((r) => r.fixture_id)));
+  const { data: matchRows } = await supabase
+    .from(TABLES.matches)
+    .select("fixture_id,home_team_name,away_team_name,home_goals,away_goals,status_short")
+    .in("fixture_id", ids);
+  const matchMap = new Map<number, any>();
+  for (const m of matchRows ?? []) matchMap.set(m.fixture_id, m);
+
+  return rows.map((r) => {
+    const m = matchMap.get(r.fixture_id);
+    const entry = mapAdviceRow(r, m);
+    return {
+      ...entry,
+      matchLabel: m ? `${m.home_team_name} vs ${m.away_team_name}` : `Match #${r.fixture_id}`,
+      finalScore:
+        m && m.home_goals !== null && m.away_goals !== null ? `${m.home_goals}-${m.away_goals}` : null,
+    };
+  });
 }
 
 async function loadLatestAnalysisRow(fixtureId: number): Promise<any | null> {

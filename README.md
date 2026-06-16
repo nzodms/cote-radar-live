@@ -236,6 +236,84 @@ match trop fermé.
 
 ---
 
+## 🤖 Assistant live « Live Betting Advice » (V2)
+
+Au-dessus du moteur de scoring, un **assistant live actionnable** transforme les données en
+**une action** : `WAIT` / `WATCH` / `SIGNAL` / `AVOID` / `INVALIDATED`, avec un conseil concret
+(quoi attendre, surveiller, éviter, pourquoi, à quelle condition, quand le signal est annulé).
+
+> Le **cerveau principal reste data-first** (données + scoring + règles + fenêtres + contexte).
+> L'IA optionnelle ne fait que **reformuler**, elle ne décide jamais.
+
+### Fonction centrale
+
+`lib/live-advice.ts` → `generateLiveBettingAdvice({ fixture, statistics, events, lineups, recentForm,
+h2h, odds, previousSnapshots, externalCommentaryEvents })` renvoie : `action`, `mainAdvice`,
+`matchScenario`, `liveReading`, `confidence`, `urgency`, `momentum` (résumés 5/10 min + depuis le
+but), `contextComparison`, `recommendedMarkets[]` (avec `timing`, `requiredConfirmation`,
+`invalidation`, `riskLevel`), `avoidMarkets[]`, `risks[]`, `nextCheck`, `dataQuality`, `finalVerdict`.
+
+### Briques
+
+- **Fenêtres 5/10 min & depuis le dernier but** (`lib/live-window-analysis.ts`) : les stats API sont
+  cumulées → on calcule les **deltas** entre le snapshot actuel et un snapshot antérieur (la minute
+  de jeu est stockée sur chaque snapshot). Permet de dire « Iran a réagi depuis le but », « le
+  rythme est retombé », « domination stérile ».
+- **Context engine** (`lib/context-engine.ts`) : favori (forme + H2H + indice de cotes), joueurs
+  clés, groupe, et surtout l'**écart pré-match vs réalité** (scénario cassé / conforme).
+- **Scénarios spéciaux codés** : outsider qui marque en premier (→ `WAIT`), domination stérile
+  (→ `AVOID`), pression réelle, match ouvert / fermé, carton rouge (→ `INVALIDATED` + recalcul),
+  blessure joueur clé, après la 75e, cotes indisponibles.
+
+### Exemple de sortie (Iran vs New Zealand, outsider mène tôt)
+
+```
+action: WAIT
+mainAdvice: "WAIT : NZ mène 0-1 contre Iran. Scénario pré-match cassé. Ne touche pas Iran
+             vainqueur live maintenant. Attends 5 à 10 minutes. Si Iran produit au moins 2 tirs,
+             1 tir cadré ou 2 corners, le marché Iran prochain but devient plus intéressant que
+             sa victoire sèche."
+avoidMarkets: [{ market: "home_win_live", reason: "Scénario cassé, attendre la réaction." }]
+nextCheck: { inMinutes: 5, whatToWatch: ["2 tirs / 1 cadré / 2 corners d'Iran en 5 min", ...] }
+```
+
+### Source secondaire (commentaires publics) — OPTIONNELLE, désactivée
+
+`lib/scrapers/public-live-commentary.ts`, `lib/commentary-parser.ts`, `lib/source-validation.ts`.
+Activée par `ENABLE_PUBLIC_COMMENTARY_INGESTION=true`. **Jamais** de contournement de
+login/captcha, **jamais** de données personnelles, **jamais** de republication mot pour mot. Elle
+**enrichit** seulement (confirmation de pression) et **ne déclenche jamais un signal fort seule** ;
+si elle **contredit l'API**, elle est ignorée pour les signaux.
+
+### Cotes / value / affiliation
+
+`lib/odds-engine.ts` : `calculateImpliedProbability`, `compareModelProbabilityToMarket`,
+`detectOddsCompression`, `detectPotentialValue`, snapshots → table `odds_snapshots`. **Cotes
+absentes ⇒ jamais de “value confirmée”**.
+
+### IA optionnelle (désactivée par défaut)
+
+`lib/ai.ts`, `lib/ai-prompts.ts`, route `GET /api/matches/{id}/ai-analysis`. Active uniquement si
+`ENABLE_AI_ANALYSIS=true` **et** une clé (`ANTHROPIC_API_KEY` ou `OPENAI_API_KEY`). L'IA reçoit les
+données + le conseil calculé et **reformule** en `executiveSummary`, `liveReading`,
+`recommendedActionExplanation`, `marketWatchlist[]`, `riskWarnings[]`, `invalidationConditions[]`,
+`finalVerdict`. Sans clé, le SaaS fonctionne avec le moteur maison.
+
+### Tests
+
+`npm run test` (via `tsx`) exécute `tests/live-advice.test.ts` : les **10 scénarios obligatoires**
+(4' sans stats, outsider mène tôt, favori qui réagit / qui ne réagit pas, domination stérile,
+match ouvert, match fermé, carton rouge, cotes absentes, source contradictoire) + l'analyse par
+fenêtres.
+
+### Migration base V2
+
+Exécuter `supabase/migrations/0002_live_advice.sql` (ou re-jouer `supabase/schema.sql`, idempotent) :
+ajoute la colonne `elapsed` aux snapshots stats et les tables `live_advice_snapshots`,
+`external_live_commentary_events`, `odds_snapshots`.
+
+---
+
 ## 💸 Respecter le plan Free (100 requêtes/jour)
 
 - Les **pages lisent la base** (dashboard, matchs, détail, historique) → **0 appel API**.
@@ -263,8 +341,9 @@ match trop fermé.
 
 Tables (voir `supabase/schema.sql`) :
 
-`world_cup_matches`, `match_statistics_snapshots`, `match_events`, `match_lineups`,
-`analysis_snapshots`, `api_usage_logs`, `affiliate_clicks` (prévue pour l'affiliation, non utilisée en V1).
+`world_cup_matches`, `match_statistics_snapshots` (avec `elapsed`), `match_events`, `match_lineups`,
+`analysis_snapshots`, `api_usage_logs`, `affiliate_clicks`, et **V2** : `live_advice_snapshots`,
+`external_live_commentary_events`, `odds_snapshots`.
 
 ---
 

@@ -5,6 +5,7 @@
 
 import type { ConfidenceLevel, MarketSignal, Severity, SignalLevel } from "@/types/analysis";
 import type { MatchPhase } from "@/types/match";
+import type { AdviceTiming, LiveAction, Urgency } from "@/types/live-advice";
 
 export function signalToneClass(signal: SignalLevel | MarketSignal["signal"]): string {
   switch (signal) {
@@ -104,5 +105,69 @@ export function phaseLabelFr(phase: MatchPhase): string {
       return "Reporté";
     default:
       return "—";
+  }
+}
+
+/* ----- Assistant live (action / timing / urgence) ----- */
+
+export function actionToneClass(action: LiveAction | string | null): string {
+  switch (action) {
+    case "SIGNAL":
+      return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40";
+    case "WATCH":
+      return "bg-amber-500/15 text-amber-300 border border-amber-500/40";
+    case "WAIT":
+      return "bg-accent/15 text-accent-bright border border-accent/40";
+    case "AVOID":
+      return "bg-slate-500/15 text-slate-300 border border-slate-500/40";
+    case "INVALIDATED":
+      return "bg-red-500/15 text-red-300 border border-red-500/40";
+    default:
+      return "bg-slate-700/40 text-slate-400 border border-slate-600/30";
+  }
+}
+
+export function actionLabelFr(action: LiveAction | string | null): string {
+  switch (action) {
+    case "SIGNAL":
+      return "SIGNAL";
+    case "WATCH":
+      return "WATCH";
+    case "WAIT":
+      return "WAIT";
+    case "AVOID":
+      return "AVOID";
+    case "INVALIDATED":
+      return "INVALIDATED";
+    default:
+      return "—";
+  }
+}
+
+export function timingLabelFr(timing: AdviceTiming): string {
+  switch (timing) {
+    case "now":
+      return "Maintenant";
+    case "wait_5_min":
+      return "Attendre 5 min";
+    case "watch_only":
+      return "Surveiller";
+    case "avoid":
+      return "Éviter";
+    default:
+      return "—";
+  }
+}
+
+export function urgencyLabelFr(urgency: Urgency): string {
+  switch (urgency) {
+    case "high":
+      return "Urgence élevée";
+    case "medium":
+      return "Urgence moyenne";
+    case "low":
+      return "Urgence faible";
+    default:
+      return "Pas d'urgence";
   }
 }
