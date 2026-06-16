@@ -10,8 +10,13 @@ import { compareOdds, hasDropped, unavailableComparison } from "@/bot/odds/odds-
 import { fetchLiveOdds, flattenApiFootballOdds, getOddsApiConfig } from "@/bot/odds/odds-provider";
 import { buildMarketWatchlist, type MarketWatchlistInput } from "@/bot/market-watchlist";
 import { formatLiveBettingDecision, generateLiveBettingDecision } from "@/bot/live-betting-decision-engine";
+import { buildOddsStatus, renderOddsStatusLines, summarizeMarkets } from "@/bot/odds/odds-status";
+import { routeCommand } from "@/bot/telegram-command-router";
+import { BotState } from "@/bot/state";
+import { getBotConfig } from "@/bot/config";
 import type { NormalizedFixture, NormalizedStatsPair, NormalizedTeamStats, RecentForm } from "@/types/match";
 import type { OddsSnapshotComparison } from "@/bot/odds/odds-snapshot";
+import type { OddsApiSettings } from "@/bot/config";
 
 let failures = 0;
 function check(name: string, cond: boolean, extra?: unknown): void {
@@ -263,7 +268,116 @@ console.log("\n[D8] Format Telegram du signal live — wording autorisé seuleme
   check("aucun wording interdit", forbidden.every((f) => !text.toLowerCase().includes(f)));
 }
 
-providerDisabled().then(() => {
+/* ============================== GARDE-FOU COTES <-> PLAYABLE ============================== */
+console.log("\n[G1] Garde-fou cotes : PLAYABLE seulement avec cote live exploitable");
+{
+  const pressure = () => ({
+    fixture: liveFixture({ elapsed: 56 }),
+    statistics: statsPair({ shotsOnGoal: 5, totalShots: 11, cornerKicks: 7, ballPossession: 61 }, { shotsOnGoal: 1, totalShots: 3, cornerKicks: 1, ballPossession: 39 }),
+    minute: 56, score: { home: 0, away: 0 },
+  });
+
+  // 1) Cotes absentes => jamais PLAYABLE.
+  const dAbsent = generateLiveBettingDecision({ ...pressure(), oddsSnapshot: unavailableComparison("cotes live non disponibles") });
+  check("absentes: action != PLAYABLE", dAbsent.action !== "PLAYABLE", dAbsent.action);
+  check("absentes: oddsAvailable=false", dAbsent.oddsAvailable === false);
+  check("absentes: prochain but reste 'watch'", dAbsent.recommendedMarkets.some((m) => m.marketName.includes("Prochain but Iran") && m.status === "watch"));
+
+  // 2) Cotes présentes mais compressées => WATCH/AVOID, jamais PLAYABLE.
+  const prev = normalizeOddsResult({ available: true, reason: null, bookmaker: "B", fetchedAt: "t", suspended: false, selections: [{ market: "Next Goal", selection: "Home", odd: 2.5 }] });
+  const cur = normalizeOddsResult({ available: true, reason: null, bookmaker: "B", fetchedAt: "t2", suspended: false, selections: [{ market: "Next Goal", selection: "Home", odd: 1.5 }] });
+  const dCompressed = generateLiveBettingDecision({ ...pressure(), oddsSnapshot: compareOdds(prev, cur) });
+  check("compressées: action WATCH ou AVOID", dCompressed.action === "WATCH" || dCompressed.action === "AVOID", dCompressed.action);
+  check("compressées: jamais PLAYABLE", dCompressed.action !== "PLAYABLE");
+  check("compressées: prochain but évité (le marché a réagi)", dCompressed.avoidMarkets.some((m) => m.reason.includes("compressée")));
+
+  // 3) Cotes présentes + pression réelle + cote exploitable => PLAYABLE possible.
+  const fresh = availableSnapshot([{ market: "Next Goal", selection: "Home", odd: 2.1 }]);
+  const dPlayable = generateLiveBettingDecision({ ...pressure(), oddsSnapshot: fresh });
+  check("exploitable: action PLAYABLE", dPlayable.action === "PLAYABLE", dPlayable.action);
+  check("exploitable: oddsAvailable=true", dPlayable.oddsAvailable === true);
+  check("exploitable: prochain but 'playable' avec cote", dPlayable.recommendedMarkets.some((m) => m.marketName.includes("Prochain but Iran") && m.status === "playable" && m.currentOdds === "2.10"));
+}
+
+console.log("\n[G2] /bet_live sans cote => messages clairs + jamais PLAYABLE");
+{
+  const d = generateLiveBettingDecision({
+    fixture: liveFixture({ elapsed: 56 }),
+    statistics: statsPair({ shotsOnGoal: 5, cornerKicks: 7, ballPossession: 61 }, { shotsOnGoal: 1 }),
+    oddsSnapshot: unavailableComparison("cotes live non disponibles"), minute: 56, score: { home: 0, away: 0 },
+  });
+  const text = formatLiveBettingDecision(liveFixture({ elapsed: 56 }), d);
+  check("affiche 'PLAYABLE désactivé'", text.includes("PLAYABLE désactivé"));
+  check("affiche 'Sans cote live exploitable, aucune value confirmée'", text.includes("Sans cote live exploitable, aucune value confirmée"));
+  check("action limitée à WAIT/WATCH/NO_BET/AVOID/INVALIDATED", ["WAIT", "WATCH", "NO_BET", "AVOID", "INVALIDATED"].includes(d.action));
+}
+
+/* ============================== VISIBILITÉ COTES (status) ============================== */
+console.log("\n[V1] Vue d'état des cotes (buildOddsStatus / render)");
+{
+  const cfg: OddsApiSettings = { enabled: true, provider: "api-football", apiKeyConfigured: true, pollSeconds: 20 };
+  const board = normalizeOddsResult({
+    available: true, reason: null, bookmaker: "Bet365", fetchedAt: "t", suspended: false,
+    selections: [
+      { market: "Match Winner", selection: "Home", odd: 1.8 }, { market: "Match Winner", selection: "Draw", odd: 3.4 }, { market: "Match Winner", selection: "Away", odd: 4.2 },
+      { market: "Goals Over/Under", selection: "Over 2.5", odd: 1.9 }, { market: "Goals Over/Under", selection: "Under 2.5", odd: 1.9 },
+      { market: "Both Teams To Score", selection: "Yes", odd: 2.1 }, { market: "Both Teams To Score", selection: "No", odd: 1.7 },
+      { market: "Next Goal", selection: "Home", odd: 2.05 }, { market: "Next Goal", selection: "Away", odd: 3.1 },
+    ],
+  });
+  const m = summarizeMarkets(board);
+  check("résumé 1X2", (m.oneX2 ?? "").includes("Domicile 1.8"));
+  check("résumé Over/Under", (m.overUnder ?? "").includes("Over 2.5 1.9"));
+  check("résumé BTTS", (m.btts ?? "").includes("Oui 2.1"));
+  check("résumé Next Goal", (m.nextGoal ?? "").includes("Domicile 2.05"));
+
+  const view = buildOddsStatus(cfg, board, Date.now());
+  check("oddsAvailable + liveOddsAvailable", view.oddsAvailable && view.liveOddsAvailable);
+  const lines = renderOddsStatusLines(view).join("\n");
+  check("affiche provider/enabled/available", lines.includes("Provider : api-football") && lines.includes("Activé : true") && lines.includes("Live odds available : true"));
+  check("affiche les marchés", lines.includes("1X2 :") && lines.includes("Prochain but :"));
+
+  const none = renderOddsStatusLines(buildOddsStatus({ enabled: false, provider: null, apiKeyConfigured: false, pollSeconds: 20 }, null, null)).join("\n");
+  check("aucune cote => PLAYABLE désactivé", none.includes("Aucune cote live exploitable — PLAYABLE désactivé."));
+  check("aucune cote => dernier fetch jamais", none.includes("Dernier fetch : jamais"));
+}
+
+console.log("\n[V2] /status et /sources affichent la visibilité cotes");
+async function routerVisibility(): Promise<void> {
+  const config = getBotConfig();
+
+  // Avec un board live exploitable sur une surveillance.
+  const state = new BotState();
+  const w = state.startWatch(1, "Iran vs New Zealand");
+  w.sensors.lastOddsBoard = normalizeOddsResult({
+    available: true, reason: null, bookmaker: "Bet365", fetchedAt: "t", suspended: false,
+    selections: [
+      { market: "Match Winner", selection: "Home", odd: 1.8 }, { market: "Match Winner", selection: "Draw", odd: 3.4 }, { market: "Match Winner", selection: "Away", odd: 4.2 },
+      { market: "Next Goal", selection: "Home", odd: 2.05 },
+    ],
+  });
+  w.sensors.lastOddsPollAt = Date.now();
+
+  const sentStatus: string[] = [];
+  await routeCommand("/status", { config, state, send: async (t: string) => void sentStatus.push(t) });
+  const statusText = sentStatus.join("\n");
+  check("/status: bloc cotes", statusText.includes("💰 Cotes"));
+  check("/status: provider + available", statusText.includes("Provider :") && statusText.includes("Odds available : true") && statusText.includes("Live odds available : true"));
+  check("/status: marchés récupérés", statusText.includes("1X2 :") && statusText.includes("Prochain but :"));
+  check("/status: indicateur cotes par match", statusText.includes("cotes live"));
+
+  const sentSources: string[] = [];
+  await routeCommand("/sources", { config, state, send: async (t: string) => void sentSources.push(t) });
+  check("/sources: bloc cotes", sentSources.join("\n").includes("💰 Cotes") && sentSources.join("\n").includes("Live odds available"));
+
+  // Sans board => message PLAYABLE désactivé.
+  const empty = new BotState();
+  const sentEmpty: string[] = [];
+  await routeCommand("/status", { config, state: empty, send: async (t: string) => void sentEmpty.push(t) });
+  check("/status sans cote: PLAYABLE désactivé", sentEmpty.join("\n").includes("Aucune cote live exploitable — PLAYABLE désactivé."));
+}
+
+Promise.all([providerDisabled(), routerVisibility()]).then(() => {
   if (failures > 0) {
     console.error(`\n❌ ${failures} assertion(s) en échec (betting-engine).`);
     process.exit(1);

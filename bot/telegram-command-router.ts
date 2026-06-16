@@ -34,6 +34,8 @@ import { formatWatchStarted, startWatchForMatch, stopWatchByFixture } from "./wa
 import { winamaxButton, winamaxSearchButton, type InlineButton } from "./bookmaker-links";
 import { buildAnalysisParts } from "./analysis-splitter";
 import { sourceHealth } from "./scrapers/source-health";
+import { buildOddsStatus, isLiveOddsExploitable, renderOddsStatusLines } from "./odds/odds-status";
+import type { NormalizedOddsBoard } from "./odds/odds-normalizer";
 
 export interface RouterCtx {
   config: BotConfig;
@@ -360,6 +362,19 @@ async function matchesFlow(ctx: RouterCtx, deps: RouterDeps): Promise<void> {
   await ctx.send(lines.join("\n"), buttons.length ? buttons : undefined);
 }
 
+/** Board de cotes le plus récent parmi les surveillances (pour /status, /sources). */
+function latestOddsBoard(ctx: RouterCtx): { board: NormalizedOddsBoard | null; lastFetchAt: number } {
+  let board: NormalizedOddsBoard | null = null;
+  let lastFetchAt = 0;
+  for (const w of ctx.state.watches.values()) {
+    if (w.sensors.lastOddsPollAt > lastFetchAt) {
+      lastFetchAt = w.sensors.lastOddsPollAt;
+      board = w.sensors.lastOddsBoard;
+    }
+  }
+  return { board, lastFetchAt };
+}
+
 function statusFlow(ctx: RouterCtx): Promise<void> {
   const { state, config } = ctx;
   const watches = state.activeWatches();
@@ -374,9 +389,14 @@ function statusFlow(ctx: RouterCtx): Promise<void> {
     const f = w.lastFixture;
     const score = f ? `${f.homeGoals ?? 0}-${f.awayGoals ?? 0}` : w.matchMeta ? "?" : "?";
     const apiAgo = w.lastApiPollAt ? `${Math.round((Date.now() - w.lastApiPollAt) / 1000)}s` : "—";
-    L.push(`• #${w.fixtureId} ${w.label} | score ${score} | action ${w.lastAction ?? "—"} | API il y a ${apiAgo} | alertes ${w.alertsSent}`);
+    const cotes = isLiveOddsExploitable(w.sensors.lastOddsBoard) ? "live" : "—";
+    L.push(`• #${w.fixtureId} ${w.label} | score ${score} | action ${w.lastAction ?? "—"} | API il y a ${apiAgo} | cotes ${cotes} | alertes ${w.alertsSent}`);
   }
   if (watches.length === 0) L.push("(aucune surveillance active — lance /watch <match>)");
+
+  const { board, lastFetchAt } = latestOddsBoard(ctx);
+  L.push("");
+  L.push(...renderOddsStatusLines(buildOddsStatus(config.oddsApi, board, lastFetchAt || null)));
   return ctx.send(L.join("\n"));
 }
 
@@ -395,6 +415,7 @@ function sourcesFlow(ctx: RouterCtx): Promise<void> {
     const h = sourceHealth.get(name);
     return `${h?.status ?? "OK (en attente)"} (poll ${poll}s)`;
   };
+  const { board, lastFetchAt } = latestOddsBoard(ctx);
   const L = [
     "🔌 État des sources",
     `• API-Football : ${c.enableApiMonitor ? lbl("api", true, c.apiPollSeconds) : "disabled"}`,
@@ -404,7 +425,8 @@ function sourcesFlow(ctx: RouterCtx): Promise<void> {
     `• News scraper : ${lbl("news", c.news.enabled, c.news.pollSeconds)}`,
     `• Alt stats scraper : ${lbl("altStats", c.altStats.enabled, c.altStats.pollSeconds)}`,
     `• Météo : ${c.weather.enabled ? `${c.weather.apiKeyConfigured ? "OK" : "clé manquante"} (${c.weather.location ?? "lieu ?"})` : "disabled"}`,
-    `• API cotes : ${c.oddsApi.enabled ? `${c.oddsApi.provider ?? "?"} (poll ${c.oddsApi.pollSeconds}s)` : "disabled — cotes live non disponibles"}`,
+    "",
+    ...renderOddsStatusLines(buildOddsStatus(c.oddsApi, board, lastFetchAt || null)),
     "",
     "API-Football reste la source principale. Sources secondaires seules = WATCH maximum.",
     "Sans API cotes : aucune value confirmée (WATCH/WAIT, jamais PLAYABLE fort).",

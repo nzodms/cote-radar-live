@@ -43,6 +43,8 @@ export interface LiveBettingDecision {
   confidence: number;
   risk: DecisionRisk;
   urgency: DecisionUrgency;
+  /** true si des cotes live exploitables ont été fournies (gate du PLAYABLE). */
+  oddsAvailable: boolean;
   recommendedMarkets: DecisionMarket[];
   avoidMarkets: DecisionMarket[];
   alreadyResolvedMarkets: DecisionMarket[];
@@ -225,7 +227,8 @@ export function generateLiveBettingDecision(input: LiveDecisionInput): LiveBetti
   if (p.pressureSide && !invalidated) {
     const side = p.pressureSide;
     const key = nextGoalKey(side);
-    const cur = fmtOdd(oddForKey(board, key));
+    const curOdd = oddForKey(board, key);
+    const cur = fmtOdd(curOdd);
     const dropped = input.oddsSnapshot ? hasDropped(input.oddsSnapshot, key) : false;
 
     if (p.isSterile && p.dominantSide === side) {
@@ -262,7 +265,8 @@ export function generateLiveBettingDecision(input: LiveDecisionInput): LiveBetti
         risk: "medium",
       });
     } else {
-      const playable = oddsAvailable && p.isRealPressure;
+      // PLAYABLE seulement avec pression réelle ET une cote live exploitable.
+      const playable = oddsAvailable && p.isRealPressure && curOdd !== null;
       recommended.push({
         marketName: `Prochain but ${sideName(side)}`,
         status: playable ? "playable" : "watch",
@@ -271,7 +275,11 @@ export function generateLiveBettingDecision(input: LiveDecisionInput): LiveBetti
           : `${sideName(side)} prend le dessus, à confirmer`,
         conditions: [
           "nouveau tir cadré ou corner dans les 2-3 min",
-          oddsAvailable ? "cote non compressée" : "cote live exploitable (API cotes indisponible)",
+          oddsAvailable
+            ? curOdd !== null
+              ? "cote non compressée"
+              : "cote live exploitable pour ce marché (non cotée actuellement)"
+            : "cote live exploitable (API cotes indisponible)",
         ],
         invalidation: [`${sideName(side === "home" ? "away" : "home")} égalise/reprend le contrôle`, "chute du rythme"],
         oddsRequired: oddsAvailable ? null : "cote live à vérifier manuellement",
@@ -435,6 +443,7 @@ export function generateLiveBettingDecision(input: LiveDecisionInput): LiveBetti
     confidence,
     risk,
     urgency,
+    oddsAvailable,
     recommendedMarkets: recommended,
     avoidMarkets: avoid,
     alreadyResolvedMarkets: resolved,
@@ -501,6 +510,7 @@ export function formatLiveBettingDecision(fixture: NormalizedFixture, d: LiveBet
   L.push(`⏱ ${min} · ${score}`);
   L.push(`Action : ${d.action}`);
   L.push(`Confiance : ${d.confidence}/100 · Risque : ${riskFr(d.risk)}`);
+  if (!d.oddsAvailable) L.push("💸 Cotes : aucune cote live exploitable — PLAYABLE désactivé.");
   L.push("");
   L.push(`Ce qui change : ${d.summary}`);
 
@@ -532,6 +542,7 @@ export function formatLiveBettingDecision(fixture: NormalizedFixture, d: LiveBet
   }
 
   L.push("");
+  if (!d.oddsAvailable) L.push("Sans cote live exploitable, aucune value confirmée.");
   L.push(`✅ Décision : ${d.summary}`);
   L.push(`🔁 Prochain check : ${Math.round(d.nextCheckSeconds / 60) >= 1 ? `${Math.round(d.nextCheckSeconds / 60)} min` : `${d.nextCheckSeconds}s`}`);
   L.push("");
