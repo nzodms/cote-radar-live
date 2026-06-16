@@ -20,8 +20,16 @@ import {
   type ResolveResult,
 } from "./match-resolver";
 import { getMatchesOverview, getWorldCupFixturesCached } from "./schedule-service";
-import { buildPreMatchAnalysis, composeContextPlan, fetchPreMatchData } from "./prematch-analysis";
-import { runForcedLiveAnalysis } from "./commands";
+import {
+  buildFullPreMatchAnalysis,
+  buildPreMatchAnalysis,
+  composeBrief,
+  composeContextPlan,
+  composeMarketsWatch,
+  fetchPreMatchData,
+} from "./prematch-analysis";
+import { runForcedLiveAnalysis, runLiveBettingDecision } from "./commands";
+import { composeWeatherReport, fetchWeather, getWeatherConfig } from "./weather-service";
 import { formatWatchStarted, startWatchForMatch, stopWatchByFixture } from "./watch-manager";
 import { winamaxButton, winamaxSearchButton, type InlineButton } from "./bookmaker-links";
 import { buildAnalysisParts } from "./analysis-splitter";
@@ -39,6 +47,11 @@ export interface RouterCtx {
 export interface RouterDeps {
   resolve: (text: string) => Promise<ResolveResult>;
   preMatch: (fixtureId: number) => Promise<string>;
+  fullPreMatch: (fixtureId: number) => Promise<string>;
+  markets: (fixtureId: number) => Promise<string>;
+  brief: (fixtureId: number) => Promise<string>;
+  weather: (match: ResolvedMatch) => Promise<string>;
+  betLive: (state: BotState, fixtureId: number) => Promise<string>;
   context: (fixtureId: number) => Promise<string>;
   forcedLive: (state: BotState, fixtureId: number) => Promise<string>;
   overview: () => Promise<{ today: NormalizedFixture[]; tomorrow: NormalizedFixture[]; live: NormalizedFixture[] }>;
@@ -49,6 +62,16 @@ export function defaultRouterDeps(): RouterDeps {
   return {
     resolve: (t) => resolveMatchFromText(t),
     preMatch: async (id) => (await buildPreMatchAnalysis(id)).text,
+    fullPreMatch: async (id) => (await buildFullPreMatchAnalysis(id)).text,
+    markets: async (id) => composeMarketsWatch(await fetchPreMatchData(id)),
+    brief: async (id) => composeBrief(await fetchPreMatchData(id)),
+    weather: async (match) => {
+      const config = getWeatherConfig();
+      const location = match.venue || config.location;
+      const weather = await fetchWeather(config, location);
+      return composeWeatherReport(`${match.homeTeam} vs ${match.awayTeam}`, weather);
+    },
+    betLive: (state, id) => runLiveBettingDecision(state, id),
     context: async (id) => composeContextPlan(await fetchPreMatchData(id)),
     forcedLive: (state, id) => runForcedLiveAnalysis(state, id),
     overview: () => getMatchesOverview(),
@@ -122,7 +145,12 @@ function helpText(): string {
     "🤖 CoteRadar Live — assistant Coupe du monde 2026.",
     "",
     "Langage naturel :",
-    "/analyse france senegal   — analyse complète avant match",
+    "/analyse france senegal   — analyse compacte orientée marchés",
+    "/analyse_full france senegal — version longue détaillée",
+    "/markets france senegal   — marchés à surveiller (classés)",
+    "/brief france senegal     — résumé très court",
+    "/weather france senegal   — météo du match",
+    "/bet_live france senegal  — décision de paris live (action)",
     "/watch france senegal     — surveillance live",
     "/analyse demain           — matchs de demain (boutons)",
     "/today  /tomorrow  /matches — programme",
@@ -163,6 +191,76 @@ async function analyseFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Prom
     return;
   }
   await ctx.send(`Aucun match Coupe du monde trouvé pour « ${query} ». Essaie /today ou /matches.`);
+}
+
+async function analyseFullFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /analyse_full <équipe1> <équipe2>  (version longue détaillée)"));
+  const res = await deps.resolve(query);
+  ctx.log?.(`[RESOLVER] input="${query}" resolved=${res.ok} kind=${res.kind} fixtureId=${res.match?.fixtureId ?? "-"}`);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const m = res.match;
+    await ctx.send(`⏳ Analyse complète (longue) — ${m.homeTeam} vs ${m.awayTeam} (#${m.fixtureId})…`);
+    const text = await deps.fullPreMatch(m.fixtureId);
+    await deliverAnalysis(ctx, text, analysisButtons(m.fixtureId));
+    return;
+  }
+  if (res.kind === "date") return void (await sendMatchList(ctx, `📅 Matchs du ${res.date} — choisis un match :`, res.alternatives));
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Plusieurs matchs correspondent — précise :", res.alternatives));
+  await ctx.send(`Aucun match Coupe du monde trouvé pour « ${query} ».`);
+}
+
+async function marketsFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /markets <équipe1> <équipe2>  (marchés à surveiller)"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const text = await deps.markets(res.match.fixtureId);
+    await ctx.send(text, analysisButtons(res.match.fixtureId));
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
+}
+
+async function briefFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /brief <équipe1> <équipe2>  (résumé très court)"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const text = await deps.brief(res.match.fixtureId);
+    await ctx.send(text, analysisButtons(res.match.fixtureId));
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
+}
+
+async function weatherFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /weather <équipe1> <équipe2>"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    const text = await deps.weather(res.match);
+    await ctx.send(text);
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
+}
+
+async function betLiveFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
+  const query = rest || (ctx.config.defaultFixtureId ? String(ctx.config.defaultFixtureId) : "");
+  if (!query) return void (await ctx.send("Usage : /bet_live <équipe1> <équipe2>  (décision de paris live)"));
+  const res = await deps.resolve(query);
+  if ((res.kind === "match" || res.kind === "fixtureId") && res.match) {
+    await ctx.send(`⏳ Signal live — ${res.match.homeTeam} vs ${res.match.awayTeam}…`);
+    const text = await deps.betLive(ctx.state, res.match.fixtureId);
+    await ctx.send(text, [[{ text: "🔴 Surveiller", callback_data: `w:${res.match.fixtureId}` }, winamaxButton(res.match.fixtureId)]]);
+    return;
+  }
+  if (res.alternatives.length > 0) return void (await sendMatchList(ctx, "Précise le match pour le signal live :", res.alternatives));
+  await ctx.send(`Aucun match trouvé pour « ${query} ».`);
 }
 
 async function liveFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Promise<void> {
@@ -305,8 +403,11 @@ function sourcesFlow(ctx: RouterCtx): Promise<void> {
     `• Lineup scraper : ${lbl("lineup", c.lineup.enabled, c.lineup.pollSeconds)}`,
     `• News scraper : ${lbl("news", c.news.enabled, c.news.pollSeconds)}`,
     `• Alt stats scraper : ${lbl("altStats", c.altStats.enabled, c.altStats.pollSeconds)}`,
+    `• Météo : ${c.weather.enabled ? `${c.weather.apiKeyConfigured ? "OK" : "clé manquante"} (${c.weather.location ?? "lieu ?"})` : "disabled"}`,
+    `• API cotes : ${c.oddsApi.enabled ? `${c.oddsApi.provider ?? "?"} (poll ${c.oddsApi.pollSeconds}s)` : "disabled — cotes live non disponibles"}`,
     "",
     "API-Football reste la source principale. Sources secondaires seules = WATCH maximum.",
+    "Sans API cotes : aucune value confirmée (WATCH/WAIT, jamais PLAYABLE fort).",
   ];
   return ctx.send(L.join("\n"));
 }
@@ -331,6 +432,19 @@ export async function routeCommand(rawText: string, ctx: RouterCtx, deps = defau
       case "/analyse":
       case "/analyse_match":
         return void (await analyseFlow(ctx, deps, rest));
+      case "/analyse_full":
+        return void (await analyseFullFlow(ctx, deps, rest));
+      case "/markets":
+      case "/marches":
+        return void (await marketsFlow(ctx, deps, rest));
+      case "/brief":
+        return void (await briefFlow(ctx, deps, rest));
+      case "/weather":
+      case "/meteo":
+        return void (await weatherFlow(ctx, deps, rest));
+      case "/bet_live":
+      case "/paris_live":
+        return void (await betLiveFlow(ctx, deps, rest));
       case "/analyse_live":
         return void (await liveFlow(ctx, deps, rest));
       case "/context":

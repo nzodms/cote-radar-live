@@ -20,6 +20,7 @@ import type {
   MarketEvent,
   MarketSnapshot,
 } from "./scraper-types";
+import type { NormalizedOddsBoard } from "./odds/odds-normalizer";
 import { AlertGate } from "./alert-classifier";
 
 export interface SensorState {
@@ -33,6 +34,9 @@ export interface SensorState {
   lastLineupPollAt: number;
   lastNewsPollAt: number;
   lastAltStatsPollAt: number;
+  // Cotes API (optionnel) — board courant pour détecter les mouvements (runtime).
+  lastOddsBoard: NormalizedOddsBoard | null;
+  lastOddsPollAt: number;
 }
 
 export interface MatchMeta {
@@ -130,6 +134,8 @@ export function createWatchState(
       lastLineupPollAt: 0,
       lastNewsPollAt: 0,
       lastAltStatsPollAt: 0,
+      lastOddsBoard: null,
+      lastOddsPollAt: 0,
     },
     lastAction: null,
     alertsSent: 0,

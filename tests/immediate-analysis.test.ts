@@ -1,10 +1,17 @@
 /**
- * Tests des analyses immédiates: /analyse_match (complet), /context, et le
- * format d'alerte live (marchés résolus). Lancé par `npm run test-immediate-analysis`.
+ * Tests des analyses immédiates avant match :
+ *  - /analyse (COMPACT, orienté marchés, 1-2 messages)
+ *  - /analyse_full (version longue conservée)
+ *  - /markets, /brief, /context
+ *  - format d'alerte live (marchés résolus)
+ * Lancé par `npm run test-immediate-analysis`.
  */
 
 import {
+  composeBrief,
   composeContextPlan,
+  composeFullPreMatchAnalysis,
+  composeMarketsWatch,
   composePreMatchAnalysis,
   type PreMatchData,
 } from "@/bot/prematch-analysis";
@@ -61,44 +68,96 @@ const data: PreMatchData = {
   context,
   group: { name: "Group I", others: ["Iraq", "Norway"] },
   odds: { available: false, bookmaker: null, updatedAt: null, oneX2: null, overUnder: null, btts: null },
+  weather: null,
 };
 
-console.log("\n[I1] /analyse_match — analyse premium");
+console.log("\n[I1] /analyse — COMPACT orienté marchés");
 {
   const text = composePreMatchAnalysis(data);
   const sections = [
-    "🏟 Analyse complète",
-    "1. Contexte du match & du groupe",
-    "2. Dynamique des équipes",
-    "3. Lecture tactique probable",
-    "4. Joueurs clés (à confirmer avec les lineups)",
-    "5. Scénarios live",
-    "6. Marchés à surveiller",
-    "🎯 Ce que je ferais",
-    "🔎 Checklist live",
-    "9. Risques",
+    "🏟 Analyse — Iran vs New Zealand",
+    "1. Résumé express",
+    "2. Forme récente",
+    "3. Conditions importantes",
+    "🎯 Marchés à surveiller",
+    "⛔ À éviter pour l'instant",
+    "🎯 Mon plan",
+    "📊 Score final de lecture",
   ];
   for (const s of sections) check(`section présente: "${s}"`, text.includes(s), s);
-  check("analyse détaillée (> 1500 caractères)", text.length > 1500, text.length);
-  check("contexte de groupe (Group I + autres équipes)", text.includes("Group I") && text.includes("Iraq, Norway"));
-  check("scénarios live concrets (1..5)", text.includes("Scénario 1") && text.includes("Scénario 5"));
-  check("checklist live (signaux d'alerte)", text.includes("Signaux d'alerte"));
-  check("cotes non affichées => aucune value confirmée", text.includes("aucune value confirmée"));
-  check("pas de répétition du round", text.split("Group Stage - 1").length - 1 <= 1, text.split("Group Stage - 1").length - 1);
-  check("mentionne le favori (Iran)", text.includes("Iran"));
+  const parts = buildAnalysisParts(text);
+  check("tient en 1-2 messages Telegram", parts.length <= 2, parts.length);
+  check("contexte de groupe (Group I + équipes)", text.includes("Group I") && text.includes("Iraq, Norway"));
+  check("favori mentionné (Iran)", text.includes("Iran"));
+  check("forme récente chiffrée", text.includes("buts/match") && text.includes("encaissés"));
+  check("météo non inventée (non disponible)", text.includes("Météo : non disponible"));
+  check("cotes absentes => aucune value confirmée", text.includes("aucune value confirmée"));
+  check("marchés joueurs masqués sans compos", text.includes("compositions non confirmées"));
+  check("score final: signal pré-match", /Signal pré-match : (WATCH|WAIT|AVOID)/.test(text));
+  check("score final: confiance /100", /Confiance : \d{1,3}\/100/.test(text));
+  check("aucun joueur inventé", !/Taremi|Azmoun/.test(text));
 }
 
-console.log("\n[I1b] cotes affichées quand disponibles");
+console.log("\n[I1b] /analyse — cotes affichées quand disponibles (sinon jamais)");
 {
   const withOdds: PreMatchData = {
     ...data,
     odds: { available: true, bookmaker: "Bet365", updatedAt: "2026-06-16T00:00:00+00:00", oneX2: { home: 1.5, draw: 4.2, away: 6 }, overUnder: { line: "2.5", over: 1.9, under: 1.9 }, btts: { yes: 2.1, no: 1.7 } },
   };
   const text = composePreMatchAnalysis(withOdds);
-  check("1X2 affiché", text.includes("1X2") && text.includes("1.5"));
-  check("over/under affiché", text.includes("Over/Under 2.5"));
-  check("BTTS affiché", text.includes("BTTS : Oui 2.1"));
+  check("1X2 affiché quand dispo", text.includes("Cotes 1X2") && text.includes("1.5"));
   check("formulation 'à surveiller'", text.includes("à surveiller"));
+  const noOdds = composePreMatchAnalysis(data);
+  check("cotes jamais inventées si absentes", noOdds.includes("non affichées"));
+}
+
+console.log("\n[I1c] météo intégrée seulement si disponible (jamais de température inventée)");
+{
+  const withWeather: PreMatchData = {
+    ...data,
+    weather: { available: true, reason: null, location: "Doha", temperatureC: 34, feelsLikeC: 38, condition: "Clear", description: "ciel dégagé", windKph: 12, humidityPct: 40, summary: "🌡 34°C · ciel dégagé · vent 12 km/h", impact: "forte chaleur : rythme souvent plus bas" },
+  };
+  const text = composePreMatchAnalysis(withWeather);
+  check("météo affichée si disponible", text.includes("34°C"));
+  check("impact météo mentionné", text.includes("chaleur"));
+}
+
+console.log("\n[I1d] /analyse_full — version longue conservée");
+{
+  const text = composeFullPreMatchAnalysis(data);
+  const sections = [
+    "🏟 Analyse complète",
+    "1. Contexte du match & du groupe",
+    "3. Lecture tactique probable",
+    "5. Scénarios live",
+    "🔎 Checklist live",
+    "9. Risques",
+  ];
+  for (const s of sections) check(`section longue présente: "${s}"`, text.includes(s), s);
+  check("analyse longue détaillée (> 1500 caractères)", text.length > 1500, text.length);
+  check("scénarios live concrets (1..5)", text.includes("Scénario 1") && text.includes("Scénario 5"));
+  check("longue > compacte", text.length > composePreMatchAnalysis(data).length);
+}
+
+console.log("\n[I1e] /markets — marchés à surveiller (classés, jamais 'à jouer' sans condition)");
+{
+  const text = composeMarketsWatch(data);
+  check("titre marchés", text.includes("Marchés à surveiller — Iran vs New Zealand"));
+  check("classement présent", text.includes("Classement"));
+  check("marché équipe (prochain but Iran)", text.includes("Prochain but Iran"));
+  check("marché match (Over/BTTS)", /Over 1\.5|BTTS/.test(text));
+  check("joueurs masqués sans compos", text.includes("compositions non confirmées"));
+  check("chaque marché a une condition d'entrée", text.includes("Entrée :"));
+  check("à éviter présent", text.includes("À éviter"));
+}
+
+console.log("\n[I1f] /brief — résumé très court");
+{
+  const text = composeBrief(data);
+  check("titre brief", text.includes("⚡ Brief — Iran vs New Zealand"));
+  check("court (< 700 caractères)", text.length < 700, text.length);
+  check("signal + confiance", /Signal pré-match : (WATCH|WAIT|AVOID)/.test(text) && /Confiance \d/.test(text));
+  check("à surveiller listé", text.includes("À surveiller :"));
 }
 
 console.log("\n[I2] /context — contexte + plan live");
@@ -131,21 +190,20 @@ console.log("\n[I3] Alerte live — marchés résolus jamais conseillés");
   check("sans cotes => value non confirmée", text.includes("aucune value confirmée"));
 }
 
-console.log("\n[I4] découpage Telegram — début jamais perdu");
+console.log("\n[I4] découpage Telegram — début jamais perdu (format compact)");
 {
   const analysis = composePreMatchAnalysis(data);
-  const parts = buildAnalysisParts(analysis, 1200);
+  const parts = buildAnalysisParts(analysis, 1000);
   check("plusieurs parties", parts.length >= 2, parts.length);
   check(
-    "partie 1 = en-tête + DÉBUT (titre + Contexte, pas la fin)",
-    parts[0].startsWith("📄 Partie 1/") && parts[0].includes("🏟 Analyse complète") && parts[0].includes("1. Contexte")
+    "partie 1 = en-tête + DÉBUT (titre + Résumé express)",
+    parts[0].startsWith("📄 Partie 1/") && parts[0].includes("🏟 Analyse — Iran vs New Zealand") && parts[0].includes("1. Résumé express")
   );
-  check("partie 1 ne commence PAS par 'Ce que je ferais'", !parts[0].includes("🎯 Ce que je ferais") || parts[0].indexOf("1. Contexte") < parts[0].indexOf("🎯"));
   const joined = parts.join("\n");
-  for (const s of ["1. Contexte", "2. Dynamique", "3. Lecture tactique", "4. Joueurs clés", "5. Scénarios live", "6. Marchés", "🎯 Ce que je ferais", "🔎 Checklist live", "9. Risques"]) {
+  for (const s of ["1. Résumé express", "2. Forme récente", "3. Conditions importantes", "🎯 Marchés à surveiller", "⛔ À éviter", "🎯 Mon plan", "📊 Score final"]) {
     check(`section conservée: ${s}`, joined.includes(s));
   }
-  check("chaque partie sous la limite Telegram", parts.every((p) => p.length <= 1300), parts.map((p) => p.length));
+  check("chaque partie sous la limite", parts.every((p) => p.length <= 1100), parts.map((p) => p.length));
 }
 
 console.log("\n[I5] /analyse envoie toutes les sections (dans l'ordre, début d'abord)");
@@ -158,6 +216,11 @@ async function routeAnalyse(): Promise<void> {
   const deps: RouterDeps = {
     resolve: async () => ({ ok: true, kind: "match", match, alternatives: [], reason: "" }),
     preMatch: async () => analysis,
+    fullPreMatch: async () => composeFullPreMatchAnalysis(data),
+    markets: async () => composeMarketsWatch(data),
+    brief: async () => composeBrief(data),
+    weather: async () => "🌡 Météo — Iran vs New Zealand\n\nMétéo non disponible (non intégrée au signal).",
+    betLive: async () => "⚡ Signal live",
     context: async () => "ctx",
     forcedLive: async () => "live",
     overview: async () => ({ today: [], tomorrow: [], live: [] }),
@@ -167,17 +230,55 @@ async function routeAnalyse(): Promise<void> {
   const ctx = { config: getBotConfig(), state: new BotState(), send: async (t: string, b?: unknown) => void sent.push({ text: t, buttons: b }) };
   await routeCommand("/analyse iran new zealand", ctx, deps);
 
-  const analysisSends = sent.filter((s) => s.text.includes("1. Contexte") || s.text.includes("📄 Partie") || s.text.includes("🎯 Ce que je ferais"));
+  const analysisSends = sent.filter((s) => s.text.includes("1. Résumé express") || s.text.includes("📄 Partie") || s.text.includes("🎯 Mon plan"));
   const joined = analysisSends.map((s) => s.text).join("\n");
   check("analyse envoyée", analysisSends.length >= 1);
-  for (const s of ["1. Contexte", "2. Dynamique", "3. Lecture tactique", "4. Joueurs clés", "5. Scénarios live", "6. Marchés", "🎯 Ce que je ferais", "🔎 Checklist live", "9. Risques"]) {
+  for (const s of ["1. Résumé express", "2. Forme récente", "🎯 Marchés à surveiller", "⛔ À éviter", "🎯 Mon plan", "📊 Score final"]) {
     check(`/analyse envoie: ${s}`, joined.includes(s));
   }
-  check("le 1er message d'analyse contient le DÉBUT", analysisSends[0].text.includes("1. Contexte"));
+  check("le 1er message d'analyse contient le DÉBUT", analysisSends[0].text.includes("1. Résumé express"));
   check("boutons sur le dernier message", Array.isArray(sent[sent.length - 1].buttons));
 }
 
-routeAnalyse().then(() => {
+console.log("\n[I6] /markets et /analyse_full routent correctement");
+async function routeMarketsAndFull(): Promise<void> {
+  const match: ResolvedMatch = {
+    fixtureId: 1489378, homeTeam: "Iran", awayTeam: "New Zealand", date: data.fixture.kickoffAt,
+    status: "not_started", leagueName: "World Cup", round: "Group Stage - 1", venue: "Doha", confidence: "high", alternatives: [],
+  };
+  const deps: RouterDeps = {
+    resolve: async () => ({ ok: true, kind: "match", match, alternatives: [], reason: "" }),
+    preMatch: async () => composePreMatchAnalysis(data),
+    fullPreMatch: async () => composeFullPreMatchAnalysis(data),
+    markets: async () => composeMarketsWatch(data),
+    brief: async () => composeBrief(data),
+    weather: async () => "🌡 Météo — Iran vs New Zealand\n\nMétéo non disponible (non intégrée au signal).",
+    betLive: async () => "⚡ Signal live — décision",
+    context: async () => "ctx",
+    forcedLive: async () => "live",
+    overview: async () => ({ today: [], tomorrow: [], live: [] }),
+    matchById: async () => match,
+  };
+  const cfg = getBotConfig();
+
+  const sentM: string[] = [];
+  await routeCommand("/markets iran new zealand", { config: cfg, state: new BotState(), send: async (t: string) => void sentM.push(t) }, deps);
+  check("/markets renvoie les marchés", sentM.join("\n").includes("Marchés à surveiller"));
+
+  const sentF: string[] = [];
+  await routeCommand("/analyse_full iran new zealand", { config: cfg, state: new BotState(), send: async (t: string) => void sentF.push(t) }, deps);
+  check("/analyse_full renvoie la version longue", sentF.join("\n").includes("Scénario 5"));
+
+  const sentW: string[] = [];
+  await routeCommand("/weather iran new zealand", { config: cfg, state: new BotState(), send: async (t: string) => void sentW.push(t) }, deps);
+  check("/weather renvoie la météo", sentW.join("\n").includes("Météo"));
+
+  const sentB: string[] = [];
+  await routeCommand("/bet_live iran new zealand", { config: cfg, state: new BotState(), send: async (t: string) => void sentB.push(t) }, deps);
+  check("/bet_live renvoie un signal live", sentB.join("\n").includes("Signal live"));
+}
+
+Promise.all([routeAnalyse(), routeMarketsAndFull()]).then(() => {
   if (failures > 0) {
     console.error(`\n❌ ${failures} assertion(s) en échec (immediate-analysis).`);
     process.exit(1);

@@ -116,6 +116,11 @@ async function run(): Promise<void> {
     const deps: RouterDeps = {
       resolve: (t) => resolveMatchFromText(t, resolverDeps),
       preMatch: async (id) => `PREMATCH:${id}`,
+      fullPreMatch: async (id) => `PREMATCH_FULL:${id}`,
+      markets: async (id) => `MARKETS:${id}`,
+      brief: async (id) => `BRIEF:${id}`,
+      weather: async (m) => `WEATHER:${m.fixtureId}`,
+      betLive: async (_s, id) => `BETLIVE:${id}`,
       context: async (id) => `CONTEXT:${id}`,
       forcedLive: async (_s, id) => `LIVE:${id}`,
       overview: async () => ({ today: FIXTURES.filter((f) => f.kickoffAt.startsWith(TODAY)), tomorrow: FIXTURES.filter((f) => f.kickoffAt.startsWith(TOMORROW)), live: [] }),

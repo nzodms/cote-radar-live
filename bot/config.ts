@@ -66,6 +66,19 @@ export interface ScraperConfig {
   pollSeconds: number;
 }
 
+export interface WeatherSettings {
+  enabled: boolean;
+  apiKeyConfigured: boolean;
+  location: string | null;
+}
+
+export interface OddsApiSettings {
+  enabled: boolean;
+  provider: string | null;
+  apiKeyConfigured: boolean;
+  pollSeconds: number;
+}
+
 export interface BotConfig {
   apiKey: string | null;
   telegramToken: string | null;
@@ -89,6 +102,10 @@ export interface BotConfig {
   lineup: ScraperConfig;
   news: { enabled: boolean; urls: string[]; pollSeconds: number };
   altStats: ScraperConfig;
+
+  // Modules optionnels (météo + API cotes)
+  weather: WeatherSettings;
+  oddsApi: OddsApiSettings;
 
   // Alias rétro-compat
   winamaxUrl: string | null;
@@ -130,6 +147,18 @@ export function getBotConfig(): BotConfig {
     pollSeconds: int(process.env.ALT_LIVE_STATS_POLL_INTERVAL_SECONDS, 30),
   };
 
+  const weather: WeatherSettings = {
+    enabled: bool(process.env.WEATHER_ENABLED, false),
+    apiKeyConfigured: Boolean(process.env.WEATHER_API_KEY),
+    location: process.env.WEATHER_LOCATION || null,
+  };
+  const oddsApi: OddsApiSettings = {
+    enabled: bool(process.env.ENABLE_ODDS_API, false),
+    provider: (process.env.ODDS_API_PROVIDER || "").trim() || null,
+    apiKeyConfigured: Boolean(process.env.ODDS_API_KEY),
+    pollSeconds: int(process.env.ODDS_POLL_INTERVAL_SECONDS, 20),
+  };
+
   return {
     apiKey: process.env.APISPORTS_KEY || null,
     telegramToken: process.env.TELEGRAM_BOT_TOKEN || null,
@@ -151,6 +180,8 @@ export function getBotConfig(): BotConfig {
     lineup,
     news,
     altStats,
+    weather,
+    oddsApi,
     winamaxUrl: commentary.url,
     winamaxPollSeconds: commentary.pollSeconds,
     enableWinamax: commentary.enabled,

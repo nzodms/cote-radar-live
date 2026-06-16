@@ -15,6 +15,10 @@ import {
 } from "./prematch-analysis";
 import { fetchApiLive, fetchContextOnce, runLiveCycle } from "./live-engine";
 import { sourceHealth } from "./scrapers/source-health";
+import { fetchLiveOdds } from "./odds/odds-provider";
+import { normalizeOddsResult } from "./odds/odds-normalizer";
+import { compareOdds } from "./odds/odds-snapshot";
+import { formatLiveBettingDecision, generateLiveBettingDecision } from "./live-betting-decision-engine";
 
 export interface CommandDeps {
   send: (text: string) => Promise<void>;
@@ -85,6 +89,61 @@ export async function runForcedLiveAnalysis(state: BotState, id: number): Promis
   if (watch) {
     watch.lastAnalysisText = text;
     watch.lastAction = advice.action;
+    watch.lastFixture = live.fixture;
+  }
+  return text;
+}
+
+/**
+ * Décision de paris live (/bet_live, /paris_live) : court, orienté action.
+ * Best-effort sur les cotes (continue sans planter si l'API cotes est absente).
+ */
+export async function runLiveBettingDecision(state: BotState, id: number): Promise<string> {
+  const live = await fetchApiLive(id);
+  if (!live) throw new Error("Fixture introuvable via l'API.");
+  const watch = state.get(id);
+  const context =
+    watch && watch.contextLoaded
+      ? { recentForm: watch.recentForm, h2h: watch.h2h, lineups: watch.lineups }
+      : await fetchContextOnce(live.fixture);
+
+  const scratch = createWatchState(id, watch?.label ?? `Match #${id}`);
+  const { advice } = runLiveCycle(
+    {
+      fixture: live.fixture,
+      statistics: live.statistics,
+      events: live.events,
+      lineups: context.lineups,
+      recentForm: context.recentForm,
+      h2h: context.h2h,
+      previousSnapshots: watch?.snapshots ?? [],
+      commentary: watch?.commentary ?? [],
+    },
+    scratch,
+    "api"
+  );
+
+  // Cotes live (best-effort) : si indisponibles, on continue (WATCH/WAIT max).
+  // Compare au dernier board connu (mouvements de cote) puis met à jour le cache.
+  const board = normalizeOddsResult(await fetchLiveOdds(id));
+  const oddsSnapshot = compareOdds(watch?.sensors.lastOddsBoard ?? null, board);
+  if (watch && board.available) watch.sensors.lastOddsBoard = board;
+
+  const decision = generateLiveBettingDecision({
+    fixture: live.fixture,
+    statistics: live.statistics,
+    events: live.events,
+    oddsSnapshot,
+    previousAdvice: advice,
+    minute: live.fixture.elapsed,
+    score: { home: live.fixture.homeGoals ?? 0, away: live.fixture.awayGoals ?? 0 },
+    lineupsConfirmed: context.lineups.length > 0,
+  });
+
+  const text = formatLiveBettingDecision(live.fixture, decision);
+  if (watch) {
+    watch.lastAnalysisText = text;
+    watch.lastAction = decision.action;
     watch.lastFixture = live.fixture;
   }
   return text;

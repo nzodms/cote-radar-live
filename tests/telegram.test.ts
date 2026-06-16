@@ -142,6 +142,8 @@ async function runCommands(): Promise<void> {
     nodeEnv: "test", envFileLoaded: false, enableTelegram: true, enableApiMonitor: true, statePath: "data/state.json",
     commentary: scraper(true, 5), market: scraper(true, 10), lineup: scraper(true, 300),
     news: { enabled: true, urls: [], pollSeconds: 900 }, altStats: scraper(false, 30),
+    weather: { enabled: false, apiKeyConfigured: false, location: null },
+    oddsApi: { enabled: false, provider: null, apiKeyConfigured: false, pollSeconds: 20 },
     winamaxUrl: null, winamaxPollSeconds: 5, enableWinamax: true,
   };
   const sent: string[] = [];

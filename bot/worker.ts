@@ -21,6 +21,9 @@ import { fetchLineupInjury } from "./scrapers/lineup-injury-scraper";
 import { fetchNewsContext } from "./scrapers/news-context-scraper";
 import { fetchAltStats } from "./scrapers/alt-live-stats-scraper";
 import { sourceHealth } from "./scrapers/source-health";
+import { fetchLiveOdds, getOddsApiConfig } from "./odds/odds-provider";
+import { normalizeOddsResult } from "./odds/odds-normalizer";
+import { compareOdds } from "./odds/odds-snapshot";
 import { fuseSignals, type FusionResult } from "./fusion-engine";
 import { formatLiveAlert } from "./format";
 import { applyPersisted, buildPersisted, loadPersisted, savePersisted } from "./persistence";
@@ -31,6 +34,7 @@ import type { FusionApiSnapshot } from "./scraper-types";
 import type { LiveAlert } from "./types";
 
 const config = getBotConfig();
+const oddsApiConfig = getOddsApiConfig();
 let running = true;
 
 function tag(t: string, msg: string): void {
@@ -320,6 +324,25 @@ async function altStatsPoll(w: WatchState): Promise<void> {
   tag("ALTSTATS", `minute=${snapshot.minute ?? "?"} source=${snapshot.source}`);
 }
 
+/* ----------------------------- Capteur cotes (optionnel) ----------------------------- */
+
+async function oddsPoll(w: WatchState): Promise<void> {
+  if (!oddsApiConfig.enabled) return;
+  w.sensors.lastOddsPollAt = Date.now();
+  const board = normalizeOddsResult(await fetchLiveOdds(w.fixtureId, oddsApiConfig));
+  if (!board.available) {
+    tag("ODDS", `indisponible: ${board.reason ?? "n/a"}`);
+    return;
+  }
+  const cmp = compareOdds(w.sensors.lastOddsBoard, board);
+  w.sensors.lastOddsBoard = board;
+  const moves = cmp.movements.filter((m) => m.direction === "drop" || m.direction === "rise" || m.direction === "suspended");
+  tag(
+    "ODDS",
+    `lines=${board.lines.length} suspended=${cmp.suspended} moves=${moves.length}${moves[0] ? ` top=${moves[0].label}/${moves[0].direction}` : ""}`
+  );
+}
+
 /* ----------------------------- Boucles ----------------------------- */
 
 function due(now: number, last: number, intervalSec: number): boolean {
@@ -356,6 +379,10 @@ function startWatcherLoop(): void {
       if (config.altStats.enabled && config.altStats.url && due(now, w.sensors.lastAltStatsPollAt, config.altStats.pollSeconds)) {
         w.sensors.lastAltStatsPollAt = now;
         altStatsPoll(w).catch((e) => tag("ALTSTATS", `err=${(e as Error).message}`));
+      }
+      if (oddsApiConfig.enabled && due(now, w.sensors.lastOddsPollAt, oddsApiConfig.pollSeconds)) {
+        w.sensors.lastOddsPollAt = now;
+        oddsPoll(w).catch((e) => tag("ODDS", `err=${(e as Error).message}`));
       }
     }
   }, 2000);
@@ -468,6 +495,8 @@ async function main(): Promise<void> {
 
   tag("COMMENTARY", `enabled=${config.commentary.enabled} interval=${config.commentary.pollSeconds}s`);
   tag("MARKET", `enabled=${config.market.enabled} interval=${config.market.pollSeconds}s`);
+  tag("WEATHER", `enabled=${config.weather.enabled} key=${config.weather.apiKeyConfigured ? "set" : "missing"} location=${config.weather.location ?? "-"}`);
+  tag("ODDS", `enabled=${oddsApiConfig.enabled} provider=${oddsApiConfig.provider ?? "-"} interval=${oddsApiConfig.pollSeconds}s`);
 
   // Chat id manquant => guide l'utilisateur.
   if (config.enableTelegram && !config.telegramChatId) {
