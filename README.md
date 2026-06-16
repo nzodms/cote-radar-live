@@ -349,12 +349,44 @@ Variables : `ENABLE_LIVE_MONITOR`, `LIVE_POLL_INTERVAL_SECONDS`, `STATS_POLL_INT
 
 ---
 
-## 🤖 Bot Telegram (worker indépendant) — `bot/`
+## 🤖 Bot Telegram (worker indépendant, multi-match) — `bot/`
 
 Assistant Telegram (Node + TS) **indépendant de Vercel** : analyse complète avant match + analyse
-live temps réel, en réutilisant le même cerveau (`generateLiveBettingAdvice`).
+live temps réel sur **n'importe quel match Coupe du monde**, en langage naturel, en réutilisant le
+même cerveau (`generateLiveBettingAdvice`).
 
-**Lancer** : `npm run worker` (process long-running, à mettre sur un VPS / Railway / Render).
+**Multi-match dynamique** (plus de `FIXTURE_ID` codé en dur) :
+```
+/analyse france senegal     /watch france senegal     /analyse demain
+/today   /tomorrow   /matches     /analyse argentine algerie     /stop france senegal
+/status   /last   /sources   /help   (+ fixtureId numérique et boutons inline)
+```
+Le bot résout le match (`bot/match-resolver.ts` + `bot/team-normalizer.ts`), récupère le `fixtureId`
+via API-Football (toute la compétition en 1 appel, mise en cache), et surveille chaque match de
+façon **scopée par fixtureId** (`bot/watch-manager.ts`, état `data/state.json`). Un match terminé
+(ex: Iran/NZ de test) n'est jamais re-watché au redémarrage.
+
+**Lancer** : `npm run worker` (process long-running). **`FIXTURE_ID` est optionnel** : sans lui, le
+worker démarre et attend les commandes Telegram.
+
+### 🚂 Déploiement Railway (worker H24)
+
+1. **New Project → Deploy from GitHub repo** → choisir ce repo.
+2. **Variables** (onglet Variables, PAS dans GitHub) : ajouter
+   `APISPORTS_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+   `TELEGRAM_BOT_LINK`, `MAX_API_CALLS_PER_DAY`, `ENABLE_TELEGRAM_ALERTS`,
+   `ENABLE_API_FOOTBALL_MONITOR`, `ENABLE_COMMENTARY_SCRAPER`, `ENABLE_MARKET_SCRAPER`,
+   et éventuellement `COMMENTARY_SOURCE_URL`, `MARKET_SOURCE_URL`, `WINAMAX_MATCH_URL_<fixtureId>`.
+   Laisser `FIXTURE_ID` vide.
+3. **Start Command** : `npm run worker` (ou via le `Procfile` : `worker: npm run worker`).
+4. **Vérifier les logs** : tu dois voir `[BOOT] Worker ready`.
+5. `.env.example` reste **vide** dans GitHub ; `.env` n'est **jamais** commité.
+
+> `tsx` est en `dependencies` pour que `npm run worker` fonctionne en production. Si
+> `TELEGRAM_CHAT_ID` manque, le worker démarre quand même, logue la marche à suivre, et affiche le
+> `chatId` du premier message reçu (à copier dans la variable).
+
+**Lancer en local** (optionnel, sans laisser le Mac allumé en prod) : `npm run worker`.
 
 **Configurer `.env`** (worker) :
 ```

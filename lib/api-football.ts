@@ -230,6 +230,12 @@ export async function getFixturesByDate(date: string): Promise<AfFixture[]> {
   return env.response;
 }
 
+/** GET /fixtures?league={id}&season={season} — toute la compétition en 1 appel. */
+export async function getLeagueFixtures(leagueId: number, season: number): Promise<AfFixture[]> {
+  const env = await apiFetch<AfFixture>("/fixtures", { league: leagueId, season });
+  return env.response;
+}
+
 /** GET /fixtures?id={fixtureId} */
 export async function getFixtureById(fixtureId: number): Promise<AfFixture | null> {
   const env = await apiFetch<AfFixture>("/fixtures", { id: fixtureId }, { fixtureId });

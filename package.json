@@ -15,16 +15,18 @@
     "test-telegram": "tsx bot/test-telegram.ts",
     "simulate-hot-event": "tsx bot/simulate-hot-event.ts",
     "simulate-critical-event": "tsx bot/simulate-critical-event.ts",
-    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts && tsx tests/telegram.test.ts && tsx tests/immediate-analysis.test.ts && tsx tests/multi-source.test.ts",
+    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts && tsx tests/telegram.test.ts && tsx tests/immediate-analysis.test.ts && tsx tests/multi-source.test.ts && tsx tests/multi-match.test.ts",
     "test-telegram-unit": "tsx tests/telegram.test.ts",
     "test-immediate-analysis": "tsx tests/immediate-analysis.test.ts",
-    "test-multi-source": "tsx tests/multi-source.test.ts"
+    "test-multi-source": "tsx tests/multi-source.test.ts",
+    "test-multi-match": "tsx tests/multi-match.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "next": "14.2.35",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tsx": "^4.16.2"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
@@ -35,7 +37,6 @@
     "eslint-config-next": "14.2.35",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.7",
-    "tsx": "^4.16.2",
     "typescript": "^5.5.4"
   }
 }

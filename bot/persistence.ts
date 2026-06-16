@@ -10,11 +10,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { NormalizedFixture } from "@/types/match";
 import type { LiveBettingAdvice } from "@/types/live-advice";
-import type { BotState } from "./state";
+import type { BotState, MatchMeta } from "./state";
 
 interface PersistedWatch {
   fixtureId: number;
   label: string;
+  matchMeta: MatchMeta | null;
+  sourceUrls: { winamax: string | null };
   lastFixture: NormalizedFixture | null;
   lastAction: string | null;
   lastAdvice: LiveBettingAdvice | null;
@@ -70,6 +72,8 @@ export function buildPersisted(state: BotState): PersistedState {
     watches: [...state.watches.values()].map((w) => ({
       fixtureId: w.fixtureId,
       label: w.label,
+      matchMeta: w.matchMeta,
+      sourceUrls: w.sourceUrls,
       lastFixture: w.lastFixture,
       lastAction: w.lastAction,
       lastAdvice: w.prevAdvice,
@@ -92,7 +96,14 @@ export function applyPersisted(state: BotState, persisted: PersistedState): void
   state.lastWinamaxPollAt = persisted.lastWinamaxPollAt || null;
 
   for (const pw of persisted.watches) {
+    // Ne pas réactiver un match terminé (ex: Iran/NZ de test).
+    const finished =
+      pw.lastFixture?.phase === "finished" || pw.matchMeta?.status === "finished";
+    if (finished) continue;
+
     const w = state.startWatch(pw.fixtureId, pw.label);
+    w.matchMeta = pw.matchMeta ?? null;
+    w.sourceUrls = pw.sourceUrls ?? { winamax: null };
     w.lastFixture = pw.lastFixture;
     w.lastAction = pw.lastAction;
     w.prevAdvice = pw.lastAdvice;

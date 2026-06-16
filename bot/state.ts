@@ -35,11 +35,24 @@ export interface SensorState {
   lastAltStatsPollAt: number;
 }
 
+export interface MatchMeta {
+  homeTeam: string;
+  awayTeam: string;
+  status: string;
+  date: string;
+  venue: string | null;
+  round: string;
+}
+
 export interface WatchState {
   fixtureId: number;
   label: string;
   startedAt: number;
   active: boolean;
+
+  // Métadonnées du match (affichage avant le 1er poll API) + URLs sources.
+  matchMeta: MatchMeta | null;
+  sourceUrls: { winamax: string | null };
 
   // Contexte (récupéré une fois)
   contextLoaded: boolean;
@@ -86,6 +99,8 @@ export function createWatchState(
     label,
     startedAt: Date.now(),
     active: true,
+    matchMeta: null,
+    sourceUrls: { winamax: null },
     contextLoaded: false,
     recentForm: { home: null, away: null },
     h2h: null,

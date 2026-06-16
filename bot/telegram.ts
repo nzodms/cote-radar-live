@@ -3,12 +3,20 @@
  * Texte brut (pas de parse_mode) pour éviter tout souci d'échappement.
  */
 
+import type { InlineButton } from "./bookmaker-links";
+
 export interface TgUpdate {
   update_id: number;
   message?: {
     message_id: number;
     text?: string;
     chat: { id: number | string };
+    from?: { id: number; username?: string };
+  };
+  callback_query?: {
+    id: string;
+    data?: string;
+    message?: { chat: { id: number | string } };
     from?: { id: number; username?: string };
   };
 }
@@ -37,27 +45,57 @@ export function splitMessage(text: string, max = 4000): string[] {
   return chunks;
 }
 
+function toInlineKeyboard(buttons: InlineButton[][]): unknown {
+  return {
+    inline_keyboard: buttons.map((row) =>
+      row.map((b) => (b.url ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.callback_data }))
+    ),
+  };
+}
+
 export async function sendTelegramMessage(
   token: string,
   chatId: string | number,
-  text: string
+  text: string,
+  buttons?: InlineButton[][]
 ): Promise<{ ok: boolean; error?: string }> {
-  for (const chunk of splitMessage(text)) {
+  const chunks = splitMessage(text);
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      text: chunks[i],
+      disable_web_page_preview: true,
+    };
+    if (isLast && buttons && buttons.length > 0) body.reply_markup = toInlineKeyboard(buttons);
     try {
       const res = await fetch(`${TG_API}/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: chunk, disable_web_page_preview: true }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        return { ok: false, error: `HTTP ${res.status} ${body.slice(0, 120)}` };
+        const errBody = await res.text().catch(() => "");
+        return { ok: false, error: `HTTP ${res.status} ${errBody.slice(0, 120)}` };
       }
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
   }
   return { ok: true };
+}
+
+export async function answerCallbackQuery(token: string, callbackId: string, text?: string): Promise<void> {
+  try {
+    await fetch(`${TG_API}/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackId, text: text ?? "" }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    /* best-effort */
+  }
 }
 
 export async function getMe(token: string): Promise<{ ok: boolean; username?: string }> {

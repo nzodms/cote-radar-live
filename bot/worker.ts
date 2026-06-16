@@ -11,8 +11,8 @@
 import { getBotConfig } from "./config";
 import { botState } from "./state";
 import type { WatchState } from "./state";
-import { getMe, getUpdates, sendTelegramMessage } from "./telegram";
-import { handleCommand } from "./commands";
+import { answerCallbackQuery, getMe, getUpdates, sendTelegramMessage } from "./telegram";
+import { routeCallback, routeCommand, type RouterCtx } from "./telegram-command-router";
 import { fetchApiLive, fetchContextOnce, runLiveCycle } from "./live-engine";
 import { fetchWinamaxCommentary } from "./winamax-watcher";
 import { fetchMarketSnapshot } from "./scrapers/market-scraper";
@@ -361,28 +361,51 @@ function startWatcherLoop(): void {
   }, 2000);
 }
 
+function makeCtx(chatId: string | number, token: string): RouterCtx {
+  return {
+    config,
+    state: botState,
+    send: (text, buttons) => sendTelegramMessage(token, chatId, text, buttons).then(() => undefined),
+    log: (line) => console.log(line),
+  };
+}
+
 async function startTelegramLoop(): Promise<void> {
   if (!config.telegramToken) {
     tag("TELEGRAM", "token absent — commandes désactivées");
     return;
   }
+  const token = config.telegramToken;
   let offset = 0;
   while (running) {
-    const updates = await getUpdates(config.telegramToken, offset, 30);
+    const updates = await getUpdates(token, offset, 30);
     for (const u of updates) {
       offset = u.update_id + 1;
-      const msg = u.message?.text;
-      const chatId = u.message?.chat.id;
-      if (!msg || chatId === undefined) continue;
-      if (config.telegramChatId && String(chatId) !== String(config.telegramChatId)) continue;
-      tag("TELEGRAM", `cmd="${msg}"`);
-      await handleCommand(msg, {
-        send: async (text) => {
-          await sendTelegramMessage(config.telegramToken as string, chatId, text);
-        },
-        state: botState,
-        config,
-      });
+
+      // Commande texte.
+      if (u.message?.text) {
+        const chatId = u.message.chat.id;
+        // Railway: si TELEGRAM_CHAT_ID non configuré, on logue le chatId entrant.
+        if (!config.telegramChatId) {
+          tag("TELEGRAM", `incoming chatId=${chatId} — mets cette valeur dans TELEGRAM_CHAT_ID`);
+        }
+        if (config.telegramChatId && String(chatId) !== String(config.telegramChatId)) continue;
+        tag("TELEGRAM", `cmd="${u.message.text}"`);
+        await routeCommand(u.message.text, makeCtx(chatId, token));
+        continue;
+      }
+
+      // Callback (bouton inline).
+      const cq = u.callback_query;
+      if (cq?.data) {
+        const data = cq.data;
+        const chatId = cq.message?.chat.id ?? config.telegramChatId;
+        await answerCallbackQuery(token, cq.id);
+        if (chatId === undefined || chatId === null) continue;
+        if (config.telegramChatId && String(chatId) !== String(config.telegramChatId)) continue;
+        tag("TELEGRAM", `callback="${data}"`);
+        await routeCallback(data, makeCtx(chatId, token));
+      }
     }
   }
 }
@@ -433,12 +456,13 @@ async function main(): Promise<void> {
   }
   tag("API-FOOTBALL", `connected=${apiConnected} quotaMode=${config.maxApiCallsPerDay}/day`);
 
-  // Watch par défaut.
+  // Watch par défaut (optionnel). Sans FIXTURE_ID, le worker attend les commandes.
   const fid = config.defaultFixtureId;
   if (fid && !botState.get(fid)) {
     botState.startWatch(fid, config.matchLabel ?? `Match #${fid}`);
   }
   if (fid) tag("WATCH", `defaultFixture=${fid} label="${config.matchLabel ?? ""}"`);
+  else tag("WATCH", "no default fixture — en attente des commandes Telegram (/analyse, /watch, /today)");
 
   tag("COMMENTARY", `enabled=${config.commentary.enabled} interval=${config.commentary.pollSeconds}s`);
   tag("MARKET", `enabled=${config.market.enabled} interval=${config.market.pollSeconds}s`);
