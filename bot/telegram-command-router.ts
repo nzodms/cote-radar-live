@@ -123,7 +123,13 @@ async function analyseFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Prom
     const m = res.match;
     await ctx.send(`⏳ Analyse complète — ${m.homeTeam} vs ${m.awayTeam} (#${m.fixtureId})…`);
     const text = await deps.preMatch(m.fixtureId);
-    await ctx.send(text, [[{ text: "🔴 Surveiller en live", callback_data: `w:${m.fixtureId}` }, winamaxButton(m.fixtureId)]]);
+    await ctx.send(text, [
+      [
+        { text: "🔴 Surveiller en live", callback_data: `w:${m.fixtureId}` },
+        { text: "📊 Analyse live maintenant", callback_data: `l:${m.fixtureId}` },
+        winamaxButton(m.fixtureId),
+      ],
+    ]);
     return;
   }
   if (res.kind === "date") {
@@ -341,7 +347,13 @@ export async function routeCallback(data: string, ctx: RouterCtx, deps = default
       const match = await deps.matchById(id);
       if (!match) return void (await ctx.send("Match introuvable."));
       const text = await deps.preMatch(id);
-      await ctx.send(text, [[{ text: "🔴 Surveiller en live", callback_data: `w:${id}` }, winamaxButton(id)]]);
+      await ctx.send(text, [
+        [
+          { text: "🔴 Surveiller en live", callback_data: `w:${id}` },
+          { text: "📊 Analyse live maintenant", callback_data: `l:${id}` },
+          winamaxButton(id),
+        ],
+      ]);
     } else if (action === "w") {
       const match = await deps.matchById(id);
       if (!match) return void (await ctx.send("Match introuvable."));

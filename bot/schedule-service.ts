@@ -4,13 +4,15 @@
  * (aujourd'hui / demain / date donnée). Quota-friendly.
  */
 
-import { getLeagueFixtures } from "@/lib/api-football";
+import { getLeagueFixtures, getStandings, type StandingGroup } from "@/lib/api-football";
 import { filterWorldCupFixtures, getWorldCupConfig, normalizeFixture } from "@/lib/world-cup-filter";
 import { todayDateUTC } from "@/lib/utils";
 import type { NormalizedFixture } from "@/types/match";
+import { sameTeam } from "./team-normalizer";
 
 const TTL_MS = 60 * 60 * 1000; // 1h
 let cache: { at: number; fixtures: NormalizedFixture[] } | null = null;
+let standingsCache: { at: number; groups: StandingGroup[] } | null = null;
 
 export async function getWorldCupFixturesCached(force = false): Promise<NormalizedFixture[]> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.fixtures;
@@ -24,6 +26,29 @@ export async function getWorldCupFixturesCached(force = false): Promise<Normaliz
 /** Permet d'injecter des fixtures (tests) ou d'invalider le cache. */
 export function setFixturesCache(fixtures: NormalizedFixture[] | null): void {
   cache = fixtures ? { at: Date.now(), fixtures } : null;
+}
+
+export async function getStandingsCached(force = false): Promise<StandingGroup[]> {
+  if (!force && standingsCache && Date.now() - standingsCache.at < TTL_MS) return standingsCache.groups;
+  const wc = getWorldCupConfig();
+  const groups = await getStandings(wc.leagueId, wc.season).catch(() => []);
+  standingsCache = { at: Date.now(), groups };
+  return groups;
+}
+
+export function setStandingsCache(groups: StandingGroup[] | null): void {
+  standingsCache = groups ? { at: Date.now(), groups } : null;
+}
+
+/** Groupe d'une équipe + autres équipes du groupe (best-effort). */
+export async function getGroupInfo(teamName: string): Promise<{ name: string | null; others: string[] }> {
+  const groups = await getStandingsCached().catch(() => []);
+  for (const g of groups) {
+    if (g.teams.some((t) => sameTeam(t, teamName))) {
+      return { name: g.group || null, others: g.teams.filter((t) => !sameTeam(t, teamName)) };
+    }
+  }
+  return { name: null, others: [] };
 }
 
 export function filterByDate(fixtures: NormalizedFixture[], date: string): NormalizedFixture[] {

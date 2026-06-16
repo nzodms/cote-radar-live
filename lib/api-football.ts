@@ -236,6 +236,29 @@ export async function getLeagueFixtures(leagueId: number, season: number): Promi
   return env.response;
 }
 
+export interface StandingGroup {
+  group: string;
+  teams: string[];
+}
+
+/** GET /standings?league={id}&season={season} — groupes + équipes (best-effort). */
+export async function getStandings(leagueId: number, season: number): Promise<StandingGroup[]> {
+  const env = await apiFetch<Record<string, unknown>>("/standings", { league: leagueId, season });
+  const first = (env.response as any[])?.[0];
+  const standings = first?.league?.standings;
+  if (!Array.isArray(standings)) return [];
+  const out: StandingGroup[] = [];
+  for (const grp of standings) {
+    if (!Array.isArray(grp) || grp.length === 0) continue;
+    const group = String(grp[0]?.group ?? "").trim();
+    const teams = grp
+      .map((r: any) => r?.team?.name)
+      .filter((n: unknown): n is string => typeof n === "string" && n.length > 0);
+    if (teams.length > 0) out.push({ group, teams });
+  }
+  return out;
+}
+
 /** GET /fixtures?id={fixtureId} */
 export async function getFixtureById(fixtureId: number): Promise<AfFixture | null> {
   const env = await apiFetch<AfFixture>("/fixtures", { id: fixtureId }, { fixtureId });

@@ -54,28 +54,46 @@ const data: PreMatchData = {
   h2h: { totalMatches: 3, team1Wins: 2, team2Wins: 1, draws: 0, recent: [] },
   lineups: [],
   context,
-  oddsAvailable: false,
+  group: { name: "Group I", others: ["Iraq", "Norway"] },
+  odds: { available: false, bookmaker: null, updatedAt: null, oneX2: null, overUnder: null, btts: null },
 };
 
-console.log("\n[I1] /analyse_match — analyse complète");
+console.log("\n[I1] /analyse_match — analyse premium");
 {
   const text = composePreMatchAnalysis(data);
   const sections = [
     "🏟 Analyse complète",
-    "1. Contexte du match",
+    "1. Contexte du match & du groupe",
     "2. Dynamique des équipes",
     "3. Lecture tactique probable",
-    "4. Joueurs clés",
-    "5. Scénarios probables",
-    "6. Marchés à surveiller AVANT match",
-    "7. Ce que je ferais avant match",
-    "8. Risques",
-    "9. Plan live à suivre",
+    "4. Joueurs clés (à confirmer avec les lineups)",
+    "5. Scénarios live",
+    "6. Marchés à surveiller",
+    "🎯 Ce que je ferais",
+    "🔎 Checklist live",
+    "9. Risques",
   ];
   for (const s of sections) check(`section présente: "${s}"`, text.includes(s), s);
-  check("analyse détaillée (> 1000 caractères)", text.length > 1000, text.length);
+  check("analyse détaillée (> 1500 caractères)", text.length > 1500, text.length);
+  check("contexte de groupe (Group I + autres équipes)", text.includes("Group I") && text.includes("Iraq, Norway"));
+  check("scénarios live concrets (1..5)", text.includes("Scénario 1") && text.includes("Scénario 5"));
+  check("checklist live (signaux d'alerte)", text.includes("Signaux d'alerte"));
+  check("cotes non affichées => aucune value confirmée", text.includes("aucune value confirmée"));
+  check("pas de répétition du round", text.split("Group Stage - 1").length - 1 <= 1, text.split("Group Stage - 1").length - 1);
   check("mentionne le favori (Iran)", text.includes("Iran"));
-  check("rappelle 'sans cotes live, aucune value' / cotes non disponibles", /value confirmée|Cotes non disponibles|cotes/i.test(text));
+}
+
+console.log("\n[I1b] cotes affichées quand disponibles");
+{
+  const withOdds: PreMatchData = {
+    ...data,
+    odds: { available: true, bookmaker: "Bet365", updatedAt: "2026-06-16T00:00:00+00:00", oneX2: { home: 1.5, draw: 4.2, away: 6 }, overUnder: { line: "2.5", over: 1.9, under: 1.9 }, btts: { yes: 2.1, no: 1.7 } },
+  };
+  const text = composePreMatchAnalysis(withOdds);
+  check("1X2 affiché", text.includes("1X2") && text.includes("1.5"));
+  check("over/under affiché", text.includes("Over/Under 2.5"));
+  check("BTTS affiché", text.includes("BTTS : Oui 2.1"));
+  check("formulation 'à surveiller'", text.includes("à surveiller"));
 }
 
 console.log("\n[I2] /context — contexte + plan live");

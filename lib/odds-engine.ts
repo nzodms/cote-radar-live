@@ -9,7 +9,7 @@
 
 import type { AfOdds } from "@/types/api-football";
 import type { NormalizedOdds } from "@/types/match";
-import type { OddsSnapshot, ValueAssessment } from "@/types/odds";
+import type { DisplayOdds, OddsSnapshot, ValueAssessment } from "@/types/odds";
 import { clamp } from "./utils";
 
 /** Probabilité implicite (0-1) à partir d'une cote décimale. */
@@ -63,6 +63,40 @@ function findOddValue(raw: AfOdds[] | undefined, betName: RegExp, valueName: Reg
     }
   }
   return null;
+}
+
+/** Extrait des cotes lisibles (1X2 / O-U 2.5 / BTTS) pour affichage. */
+export function extractDisplayOdds(odds: NormalizedOdds): DisplayOdds {
+  const empty: DisplayOdds = {
+    available: false,
+    bookmaker: null,
+    updatedAt: null,
+    oneX2: null,
+    overUnder: null,
+    btts: null,
+  };
+  if (!odds.available || !odds.raw || odds.raw.length === 0) return empty;
+
+  const block = odds.raw[0];
+  const bookmaker = block?.bookmakers?.[0]?.name ?? null;
+  const updatedAt = block?.update ?? null;
+
+  const home = findOddValue(odds.raw, /match winner|1x2|winner/i, /^home$|^1$/i);
+  const draw = findOddValue(odds.raw, /match winner|1x2|winner/i, /^draw$|^x$/i);
+  const away = findOddValue(odds.raw, /match winner|1x2|winner/i, /^away$|^2$/i);
+  const over = findOddValue(odds.raw, /over\/under|goals over\/under|totals/i, /over 2\.5/i);
+  const under = findOddValue(odds.raw, /over\/under|goals over\/under|totals/i, /under 2\.5/i);
+  const yes = findOddValue(odds.raw, /both teams.*score|btts/i, /^yes$/i);
+  const no = findOddValue(odds.raw, /both teams.*score|btts/i, /^no$/i);
+
+  return {
+    available: true,
+    bookmaker,
+    updatedAt,
+    oneX2: home !== null && draw !== null && away !== null ? { home, draw, away } : null,
+    overUnder: over !== null && under !== null ? { line: "2.5", over, under } : null,
+    btts: yes !== null && no !== null ? { yes, no } : null,
+  };
 }
 
 /** Déduit le favori pré-match depuis le marché "Match Winner" si disponible. */

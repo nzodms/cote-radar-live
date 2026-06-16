@@ -35,3 +35,13 @@ export interface ValueAssessment {
   oddsCompressed: boolean;
   notes: string[];
 }
+
+/** Cotes lisibles à afficher dans une analyse (1X2 / O-U / BTTS). */
+export interface DisplayOdds {
+  available: boolean;
+  bookmaker: string | null;
+  updatedAt: string | null;
+  oneX2: { home: number; draw: number; away: number } | null;
+  overUnder: { line: string; over: number; under: number } | null;
+  btts: { yes: number; no: number } | null;
+}
