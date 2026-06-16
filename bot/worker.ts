@@ -11,7 +11,7 @@
 import { getBotConfig } from "./config";
 import { botState } from "./state";
 import type { WatchState } from "./state";
-import { answerCallbackQuery, getMe, getUpdates, sendTelegramMessage } from "./telegram";
+import { answerCallbackQuery, getMe, getUpdates, sendLongTelegramAnalysis, sendTelegramMessage } from "./telegram";
 import { routeCallback, routeCommand, type RouterCtx } from "./telegram-command-router";
 import { fetchApiLive, fetchContextOnce, runLiveCycle } from "./live-engine";
 import { fetchWinamaxCommentary } from "./winamax-watcher";
@@ -366,6 +366,8 @@ function makeCtx(chatId: string | number, token: string): RouterCtx {
     config,
     state: botState,
     send: (text, buttons) => sendTelegramMessage(token, chatId, text, buttons).then(() => undefined),
+    sendAnalysis: (analysis, buttons) =>
+      sendLongTelegramAnalysis(token, chatId, analysis, buttons).then(() => undefined),
     log: (line) => console.log(line),
   };
 }

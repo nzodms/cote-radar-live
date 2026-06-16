@@ -4,6 +4,7 @@
  */
 
 import type { InlineButton } from "./bookmaker-links";
+import { buildAnalysisParts } from "./analysis-splitter";
 
 export interface TgUpdate {
   update_id: number;
@@ -83,6 +84,50 @@ export async function sendTelegramMessage(
     }
   }
   return { ok: true };
+}
+
+/**
+ * Envoie une analyse longue découpée par section ("Partie i/N"), dans l'ordre,
+ * boutons sur le dernier message uniquement. Ne perd jamais le début et ne
+ * fail jamais silencieusement.
+ */
+export async function sendLongTelegramAnalysis(
+  token: string,
+  chatId: string | number,
+  analysis: string,
+  buttons?: InlineButton[][]
+): Promise<{ ok: boolean; parts: number }> {
+  const parts = buildAnalysisParts(analysis);
+  console.log(`[TELEGRAM] analysis split parts=${parts.length}`);
+  let allOk = true;
+
+  for (let i = 0; i < parts.length; i++) {
+    const isLast = i === parts.length - 1;
+    let r = await sendTelegramMessage(token, chatId, parts[i], isLast ? buttons : undefined);
+
+    if (!r.ok && /too long|HTTP 400/i.test(r.error ?? "")) {
+      console.log("[TELEGRAM] message too long, splitting...");
+      const sub = splitMessage(parts[i], 3000);
+      let subOk = true;
+      for (let j = 0; j < sub.length; j++) {
+        const last = isLast && j === sub.length - 1;
+        const rr = await sendTelegramMessage(token, chatId, sub[j], last ? buttons : undefined);
+        if (!rr.ok) subOk = false;
+      }
+      console.log(`[TELEGRAM] reply sent=${subOk} parts=${sub.length}`);
+      if (!subOk) allOk = false;
+      continue;
+    }
+
+    if (r.ok) {
+      console.log(`[TELEGRAM] sent analysis part=${i + 1}/${parts.length}`);
+    } else {
+      allOk = false;
+      console.log(`[TELEGRAM] sent analysis part=${i + 1}/${parts.length} FAILED ${r.error ?? ""}`);
+    }
+  }
+
+  return { ok: allOk, parts: parts.length };
 }
 
 export async function answerCallbackQuery(token: string, callbackId: string, text?: string): Promise<void> {

@@ -239,7 +239,7 @@ export function composePreMatchAnalysis(data: PreMatchData): string {
   // 8. Checklist live
   L.push("🔎 Checklist live");
   L.push(`À surveiller pour ${favName} : tirs cadrés · corners rapprochés · récupération haute · présence dans la surface · baisse de cote cohérente.`);
-  L.push(`À surveiller pour ${undName} : transitions rapides · coups de pied arrêtés · tirs malgré faible possession · ${favName} exposé derrière.`);
+  L.push(`À surveiller pour ${undName} : transitions rapides · coups de pied arrêtés · tirs malgré faible possession · espaces derrière la défense de ${favName}.`);
   L.push(`Signaux d'alerte : ${favName} possession haute mais 0 tir cadré · ${undName} qui sort facilement · carton jaune rapide sur un défenseur · blessure/changement forcé · cote qui se compresse trop vite.`);
   L.push("");
 

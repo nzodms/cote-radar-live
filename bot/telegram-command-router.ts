@@ -24,12 +24,15 @@ import { buildPreMatchAnalysis, composeContextPlan, fetchPreMatchData } from "./
 import { runForcedLiveAnalysis } from "./commands";
 import { formatWatchStarted, startWatchForMatch, stopWatchByFixture } from "./watch-manager";
 import { winamaxButton, winamaxSearchButton, type InlineButton } from "./bookmaker-links";
+import { buildAnalysisParts } from "./analysis-splitter";
 import { sourceHealth } from "./scrapers/source-health";
 
 export interface RouterCtx {
   config: BotConfig;
   state: BotState;
   send: (text: string, buttons?: InlineButton[][]) => Promise<void>;
+  /** Envoi d'une analyse longue (découpée par section). Optionnel (worker). */
+  sendAnalysis?: (analysis: string, buttons?: InlineButton[][]) => Promise<void>;
   log?: (line: string) => void;
 }
 
@@ -69,6 +72,31 @@ function matchLine(m: ResolvedMatch, i?: number): string {
   const idx = i !== undefined ? `${i}. ` : "";
   const extra = m.round ? ` · ${m.round}` : "";
   return `${idx}${statusEmoji(m.status)} ${m.homeTeam} vs ${m.awayTeam} — ${formatKickoff(m.date)}${extra}`;
+}
+
+function analysisButtons(fixtureId: number): InlineButton[][] {
+  return [
+    [
+      { text: "🔴 Surveiller en live", callback_data: `w:${fixtureId}` },
+      { text: "📊 Analyse live maintenant", callback_data: `l:${fixtureId}` },
+      winamaxButton(fixtureId),
+    ],
+  ];
+}
+
+/** Envoie une analyse longue: découpée par section ("Partie i/N"), dans l'ordre. */
+async function deliverAnalysis(ctx: RouterCtx, analysis: string, buttons: InlineButton[][]): Promise<void> {
+  if (ctx.sendAnalysis) {
+    await ctx.sendAnalysis(analysis, buttons);
+    return;
+  }
+  const parts = buildAnalysisParts(analysis);
+  ctx.log?.(`[TELEGRAM] analysis split parts=${parts.length}`);
+  for (let i = 0; i < parts.length; i++) {
+    const isLast = i === parts.length - 1;
+    await ctx.send(parts[i], isLast ? buttons : undefined);
+    ctx.log?.(`[TELEGRAM] sent analysis part=${i + 1}/${parts.length}`);
+  }
 }
 
 function matchActionRow(m: ResolvedMatch): InlineButton[] {
@@ -123,13 +151,7 @@ async function analyseFlow(ctx: RouterCtx, deps: RouterDeps, rest: string): Prom
     const m = res.match;
     await ctx.send(`⏳ Analyse complète — ${m.homeTeam} vs ${m.awayTeam} (#${m.fixtureId})…`);
     const text = await deps.preMatch(m.fixtureId);
-    await ctx.send(text, [
-      [
-        { text: "🔴 Surveiller en live", callback_data: `w:${m.fixtureId}` },
-        { text: "📊 Analyse live maintenant", callback_data: `l:${m.fixtureId}` },
-        winamaxButton(m.fixtureId),
-      ],
-    ]);
+    await deliverAnalysis(ctx, text, analysisButtons(m.fixtureId));
     return;
   }
   if (res.kind === "date") {
@@ -347,13 +369,7 @@ export async function routeCallback(data: string, ctx: RouterCtx, deps = default
       const match = await deps.matchById(id);
       if (!match) return void (await ctx.send("Match introuvable."));
       const text = await deps.preMatch(id);
-      await ctx.send(text, [
-        [
-          { text: "🔴 Surveiller en live", callback_data: `w:${id}` },
-          { text: "📊 Analyse live maintenant", callback_data: `l:${id}` },
-          winamaxButton(id),
-        ],
-      ]);
+      await deliverAnalysis(ctx, text, analysisButtons(id));
     } else if (action === "w") {
       const match = await deps.matchById(id);
       if (!match) return void (await ctx.send("Match introuvable."));

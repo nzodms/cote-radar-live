@@ -9,6 +9,11 @@ import {
   type PreMatchData,
 } from "@/bot/prematch-analysis";
 import { formatLiveAlert } from "@/bot/format";
+import { buildAnalysisParts } from "@/bot/analysis-splitter";
+import { routeCommand, type RouterDeps } from "@/bot/telegram-command-router";
+import { BotState } from "@/bot/state";
+import { getBotConfig } from "@/bot/config";
+import type { ResolvedMatch } from "@/bot/match-resolver";
 import type { NormalizedFixture, RecentForm } from "@/types/match";
 import type { ContextIntelligence, LiveBettingAdvice } from "@/types/live-advice";
 
@@ -126,9 +131,57 @@ console.log("\n[I3] Alerte live — marchés résolus jamais conseillés");
   check("sans cotes => value non confirmée", text.includes("aucune value confirmée"));
 }
 
-if (failures > 0) {
-  console.error(`\n❌ ${failures} assertion(s) en échec (immediate-analysis).`);
-  process.exit(1);
-} else {
-  console.log("\n✅ Tests analyses immédiates OK.");
+console.log("\n[I4] découpage Telegram — début jamais perdu");
+{
+  const analysis = composePreMatchAnalysis(data);
+  const parts = buildAnalysisParts(analysis, 1200);
+  check("plusieurs parties", parts.length >= 2, parts.length);
+  check(
+    "partie 1 = en-tête + DÉBUT (titre + Contexte, pas la fin)",
+    parts[0].startsWith("📄 Partie 1/") && parts[0].includes("🏟 Analyse complète") && parts[0].includes("1. Contexte")
+  );
+  check("partie 1 ne commence PAS par 'Ce que je ferais'", !parts[0].includes("🎯 Ce que je ferais") || parts[0].indexOf("1. Contexte") < parts[0].indexOf("🎯"));
+  const joined = parts.join("\n");
+  for (const s of ["1. Contexte", "2. Dynamique", "3. Lecture tactique", "4. Joueurs clés", "5. Scénarios live", "6. Marchés", "🎯 Ce que je ferais", "🔎 Checklist live", "9. Risques"]) {
+    check(`section conservée: ${s}`, joined.includes(s));
+  }
+  check("chaque partie sous la limite Telegram", parts.every((p) => p.length <= 1300), parts.map((p) => p.length));
 }
+
+console.log("\n[I5] /analyse envoie toutes les sections (dans l'ordre, début d'abord)");
+async function routeAnalyse(): Promise<void> {
+  const analysis = composePreMatchAnalysis(data);
+  const match: ResolvedMatch = {
+    fixtureId: 1489378, homeTeam: "Iran", awayTeam: "New Zealand", date: data.fixture.kickoffAt,
+    status: "not_started", leagueName: "World Cup", round: "Group Stage - 1", venue: null, confidence: "high", alternatives: [],
+  };
+  const deps: RouterDeps = {
+    resolve: async () => ({ ok: true, kind: "match", match, alternatives: [], reason: "" }),
+    preMatch: async () => analysis,
+    context: async () => "ctx",
+    forcedLive: async () => "live",
+    overview: async () => ({ today: [], tomorrow: [], live: [] }),
+    matchById: async () => match,
+  };
+  const sent: Array<{ text: string; buttons?: unknown }> = [];
+  const ctx = { config: getBotConfig(), state: new BotState(), send: async (t: string, b?: unknown) => void sent.push({ text: t, buttons: b }) };
+  await routeCommand("/analyse iran new zealand", ctx, deps);
+
+  const analysisSends = sent.filter((s) => s.text.includes("1. Contexte") || s.text.includes("📄 Partie") || s.text.includes("🎯 Ce que je ferais"));
+  const joined = analysisSends.map((s) => s.text).join("\n");
+  check("analyse envoyée", analysisSends.length >= 1);
+  for (const s of ["1. Contexte", "2. Dynamique", "3. Lecture tactique", "4. Joueurs clés", "5. Scénarios live", "6. Marchés", "🎯 Ce que je ferais", "🔎 Checklist live", "9. Risques"]) {
+    check(`/analyse envoie: ${s}`, joined.includes(s));
+  }
+  check("le 1er message d'analyse contient le DÉBUT", analysisSends[0].text.includes("1. Contexte"));
+  check("boutons sur le dernier message", Array.isArray(sent[sent.length - 1].buttons));
+}
+
+routeAnalyse().then(() => {
+  if (failures > 0) {
+    console.error(`\n❌ ${failures} assertion(s) en échec (immediate-analysis).`);
+    process.exit(1);
+  } else {
+    console.log("\n✅ Tests analyses immédiates OK.");
+  }
+});
