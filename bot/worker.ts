@@ -124,7 +124,14 @@ async function dispatch(
       if (!r.ok) tag("TELEGRAM", `sent=false error=${r.error}`);
     }
     tag("TELEGRAM", `sent=${sent} alertType=${alert.kind} level=${alert.level} source=${alert.source}`);
-    if (alert.source === "secondary") w.lastApiPollAt = 0; // confirmation API immédiate
+    // Source secondaire => confirmation API immédiate, throttlée (IMMEDIATE_ANALYSIS_COOLDOWN_SECONDS).
+    if (alert.source === "secondary") {
+      const now = Date.now();
+      if (now - w.lastImmediateConfirmAt >= config.immediateAnalysisCooldownSeconds * 1000) {
+        w.lastApiPollAt = 0;
+        w.lastImmediateConfirmAt = now;
+      }
+    }
   }
   persist();
 }
@@ -396,25 +403,26 @@ function registerSources(): void {
 }
 
 async function main(): Promise<void> {
+  tag("BOOT", "CoteRadar worker starting");
+  tag("CONFIG", `loaded=${config.envFileLoaded}`);
+
+  // Cooldown anti-doublon configurable.
+  botState.defaultGateCooldownSeconds = config.minSecondsBetweenSimilarAlerts;
+
   registerSources();
 
   // Réhydrate l'état (anti re-spam au redémarrage).
   const persisted = loadPersisted(config.statePath);
   if (persisted) applyPersisted(botState, persisted);
 
-  const fid = config.defaultFixtureId;
-  if (fid && !botState.get(fid)) {
-    botState.startWatch(fid, config.matchLabel ?? `Match #${fid}`);
-  }
-  tag("BOOT", `Worker started fixture=${fid ?? "none"} restored=${persisted ? "yes" : "no"}`);
-
-  // Diagnostics de connexion.
+  // Telegram.
   let tgConnected = false;
   if (config.telegramToken) {
     tgConnected = (await getMe(config.telegramToken)).ok;
   }
-  tag("TELEGRAM", `connected=${tgConnected} chatId=${Boolean(config.telegramChatId)}`);
+  tag("TELEGRAM", `enabled=${config.enableTelegram} connected=${tgConnected}`);
 
+  // API-Football.
   let apiConnected = false;
   if (config.apiKey) {
     try {
@@ -423,16 +431,35 @@ async function main(): Promise<void> {
       apiConnected = false;
     }
   }
-  tag("API", `connected=${apiConnected} quotaMode=${config.maxApiCallsPerDay}/day used=${botState.apiCallsUsedToday}`);
-  tag("WINAMAX", `enabled=${config.commentary.enabled} interval=${config.commentary.pollSeconds}s source=${config.commentary.url ?? "none"}`);
-  tag("MARKET", `enabled=${config.market.enabled} interval=${config.market.pollSeconds}s source=${config.market.url ?? "none"}`);
+  tag("API-FOOTBALL", `connected=${apiConnected} quotaMode=${config.maxApiCallsPerDay}/day`);
 
-  if (!config.apiKey) {
-    tag("BOOT", "APISPORTS_KEY manquante: le worker tourne mais l'API ne répondra pas.");
+  // Watch par défaut.
+  const fid = config.defaultFixtureId;
+  if (fid && !botState.get(fid)) {
+    botState.startWatch(fid, config.matchLabel ?? `Match #${fid}`);
   }
+  if (fid) tag("WATCH", `defaultFixture=${fid} label="${config.matchLabel ?? ""}"`);
+
+  tag("COMMENTARY", `enabled=${config.commentary.enabled} interval=${config.commentary.pollSeconds}s`);
+  tag("MARKET", `enabled=${config.market.enabled} interval=${config.market.pollSeconds}s`);
+
+  // Chat id manquant => guide l'utilisateur.
+  if (config.enableTelegram && !config.telegramChatId) {
+    const link = config.telegramBotLink ?? "https://t.me/CoteRadar_bot";
+    console.log("");
+    console.log("TELEGRAM_CHAT_ID manquant.");
+    console.log(`1. Ouvre le bot : ${link}`);
+    console.log("2. Envoie /start");
+    console.log("3. Lance npm run get-chat-id");
+    console.log("4. Copie le chat.id dans .env");
+    console.log("");
+  }
+
   if (config.telegramToken && config.telegramChatId && config.enableTelegram && tgConnected) {
     await sendTelegramMessage(config.telegramToken, config.telegramChatId, "🤖 CoteRadar Live démarré. /help pour les commandes.").catch(() => undefined);
   }
+
+  tag("BOOT", "Worker ready");
 
   setInterval(persist, 15000);
   startWatcherLoop();

@@ -62,6 +62,7 @@ export interface WatchState {
   // Timing
   lastApiPollAt: number;
   lastWinamaxPollAt: number;
+  lastImmediateConfirmAt: number;
   winamaxErrorCount: number;
 
   // Capteurs multi-sources
@@ -75,7 +76,11 @@ export interface WatchState {
   lastCommentaryText: string | null;
 }
 
-export function createWatchState(fixtureId: number, label: string): WatchState {
+export function createWatchState(
+  fixtureId: number,
+  label: string,
+  gateCooldownSeconds = 30
+): WatchState {
   return {
     fixtureId,
     label,
@@ -94,9 +99,10 @@ export function createWatchState(fixtureId: number, label: string): WatchState {
     commentary: [],
     lastFixture: null,
     lastStatistics: null,
-    gate: new AlertGate(30),
+    gate: new AlertGate(gateCooldownSeconds),
     lastApiPollAt: 0,
     lastWinamaxPollAt: 0,
+    lastImmediateConfirmAt: 0,
     winamaxErrorCount: 0,
     sensors: {
       lastMarketSnapshot: null,
@@ -125,6 +131,8 @@ export class BotState {
   lastWinamaxPollAt: number | null = null;
   apiCallsUsedToday = 0;
   apiCallsDate = new Date().toISOString().slice(0, 10);
+  /** Cooldown anti-doublon des alertes similaires (HIGH), configurable. */
+  defaultGateCooldownSeconds = 30;
 
   /** Incrémente le compteur d'appels API du jour (reset auto chaque jour UTC). */
   bumpApi(n: number): void {
@@ -142,7 +150,7 @@ export class BotState {
       existing.active = true;
       return existing;
     }
-    const w = createWatchState(fixtureId, label);
+    const w = createWatchState(fixtureId, label, this.defaultGateCooldownSeconds);
     this.watches.set(fixtureId, w);
     return w;
   }
