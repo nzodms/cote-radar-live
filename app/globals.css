@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #05070f;
+  color: #e2e8f0;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar discrète, cohérente avec le dark mode premium */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #080b16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a2440;
+  border-radius: 9999px;
+  border: 2px solid #080b16;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #243152;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-night-900 shadow-card;
+  }
+  .card-pad {
+    @apply p-4 sm:p-5;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none;
+  }
+  .stat-bar-track {
+    @apply h-2 w-full overflow-hidden rounded-full bg-night-700;
+  }
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+  .pill {
+    @apply inline-flex items-center rounded-md border border-border bg-night-850 px-2 py-1 text-xs text-slate-300;
+  }
+}
