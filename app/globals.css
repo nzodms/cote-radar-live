@@ -2,55 +2,165 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
-}
+/* =========================================================================
+   SupplierPilot — design tokens
+   Premium light SaaS. Off-white / soft blue atmosphere, liquid glass.
+   ========================================================================= */
+@layer base {
+  :root {
+    --background: 222 40% 98%;
+    --foreground: 222 32% 12%;
 
-html,
-body {
-  background-color: #05070f;
-  color: #e2e8f0;
-}
+    --card: 0 0% 100%;
+    --card-foreground: 222 32% 12%;
 
-body {
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 32% 12%;
 
-/* Scrollbar discrète, cohérente avec le dark mode premium */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: #080b16;
-}
-::-webkit-scrollbar-thumb {
-  background: #1a2440;
-  border-radius: 9999px;
-  border: 2px solid #080b16;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #243152;
+    --primary: 222 83% 56%;
+    --primary-deep: 226 70% 46%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 222 90% 96%;
+
+    --secondary: 220 24% 96%;
+    --secondary-foreground: 222 30% 22%;
+
+    --muted: 220 24% 95%;
+    --muted-foreground: 220 12% 46%;
+
+    --accent: 221 90% 96%;
+    --accent-foreground: 224 64% 33%;
+
+    --border: 220 24% 90%;
+    --border-strong: 220 20% 84%;
+    --input: 220 24% 90%;
+    --ring: 222 83% 56%;
+
+    --success: 152 56% 40%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 60% 94%;
+
+    --warning: 35 92% 48%;
+    --warning-foreground: 30 60% 16%;
+    --warning-soft: 40 96% 92%;
+
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 86% 96%;
+
+    --info: 208 88% 50%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 206 92% 94%;
+
+    /* Atmospheric background glows */
+    --glow-1: 222 90% 80%;
+    --glow-2: 250 84% 84%;
+    --glow-3: 200 90% 82%;
+
+    --radius: 0.875rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Atmospheric app canvas: soft off-white base + layered blue glows */
+  .app-canvas {
+    position: relative;
+    background-color: hsl(var(--background));
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+
+  /* Refined scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.14);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground) / 0.24);
+    background-clip: content-box;
+  }
 }
 
 @layer components {
-  .card {
-    @apply rounded-xl border border-border bg-night-900 shadow-card;
+  /* Liquid-glass panel: translucent surface, soft border, layered depth */
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass;
   }
-  .card-pad {
-    @apply p-4 sm:p-5;
+  .glass-strong {
+    @apply bg-white/85 backdrop-blur-2xl border border-white/70 shadow-elevated;
   }
-  .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none;
+  .panel {
+    @apply rounded-2xl border border-border bg-card shadow-card;
   }
-  .stat-bar-track {
-    @apply h-2 w-full overflow-hidden rounded-full bg-night-700;
+
+  /* Subtle hairline used on premium cards */
+  .hairline {
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.7);
   }
-  .section-title {
-    @apply text-xs font-semibold uppercase tracking-wider text-slate-400;
+
+  /* Text helpers */
+  .text-balance {
+    text-wrap: balance;
   }
-  .pill {
-    @apply inline-flex items-center rounded-md border border-border bg-night-850 px-2 py-1 text-xs text-slate-300;
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(
+      135deg,
+      hsl(var(--foreground)) 0%,
+      hsl(var(--primary-deep)) 120%
+    );
+  }
+
+  /* Skeleton shimmer block */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted/70;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full bg-shimmer;
+    content: "";
+    animation: shimmer 1.8s infinite;
+  }
+}
+
+@layer utilities {
+  .bg-app-radial {
+    background-image: radial-gradient(
+        1200px 600px at 12% -10%,
+        hsl(var(--glow-1) / 0.55),
+        transparent 55%
+      ),
+      radial-gradient(900px 500px at 100% 0%, hsl(var(--glow-2) / 0.4), transparent 50%),
+      radial-gradient(700px 700px at 50% 120%, hsl(var(--glow-3) / 0.3), transparent 55%);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }

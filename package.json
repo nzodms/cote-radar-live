@@ -1,34 +1,27 @@
 {
-  "name": "cote-radar-live",
-  "version": "0.1.0",
+  "name": "supplierpilot",
+  "version": "1.0.0",
   "private": true,
-  "description": "CoteRadar Live - Outil privé d'analyse live des matchs de Coupe du monde (data-first).",
+  "description": "SupplierPilot — Shopify + WhatsApp + AI supplier operations for premium e-commerce merchants.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "worker": "tsx bot/worker.ts",
-    "worker:debug": "tsx bot/debug.ts",
-    "check-config": "tsx bot/check-config.ts",
-    "get-chat-id": "tsx bot/get-chat-id.ts",
-    "test-telegram": "tsx bot/test-telegram.ts",
-    "simulate-hot-event": "tsx bot/simulate-hot-event.ts",
-    "simulate-critical-event": "tsx bot/simulate-critical-event.ts",
-    "test": "tsx tests/live-advice.test.ts && tsx tests/live-monitor.test.ts && tsx tests/telegram.test.ts && tsx tests/immediate-analysis.test.ts && tsx tests/multi-source.test.ts && tsx tests/multi-match.test.ts && tsx tests/betting-engine.test.ts && tsx tests/live-decision.test.ts",
-    "test-telegram-unit": "tsx tests/telegram.test.ts",
-    "test-immediate-analysis": "tsx tests/immediate-analysis.test.ts",
-    "test-multi-source": "tsx tests/multi-source.test.ts",
-    "test-multi-match": "tsx tests/multi-match.test.ts",
-    "test-betting-engine": "tsx tests/betting-engine.test.ts",
-    "test-live-decision": "tsx tests/live-decision.test.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
+    "@anthropic-ai/sdk": "^0.27.3",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.3.24",
+    "lucide-react": "^0.435.0",
     "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tsx": "^4.16.2"
+    "tailwind-merge": "^2.5.2",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
@@ -39,6 +32,7 @@
     "eslint-config-next": "14.2.35",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.7",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.5.4"
   }
 }

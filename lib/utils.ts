@@ -1,106 +1,120 @@
-/**
- * Petits utilitaires partagés (formatage, parsing, classes CSS).
- */
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import type { Currency } from "@/types";
 
-import type { MatchPhase } from "@/types/match";
-
-/** Concatène des classes conditionnelles sans dépendance externe. */
-export function cn(...classes: Array<string | false | null | undefined>): string {
-  return classes.filter(Boolean).join(" ");
+/** Tailwind-aware className combiner (shadcn convention). */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 }
 
-/** Date du jour au format YYYY-MM-DD (UTC). */
-export function todayDateUTC(): string {
-  return new Date().toISOString().slice(0, 10);
+const CURRENCY_LOCALE: Record<Currency, string> = {
+  EUR: "fr-FR",
+  USD: "en-US",
+  GBP: "en-GB",
+  CNY: "zh-CN",
+};
+
+export function formatCurrency(
+  amount: number,
+  currency: Currency = "EUR",
+  opts: { decimals?: number } = {},
+): string {
+  const decimals = opts.decimals ?? 2;
+  return new Intl.NumberFormat(CURRENCY_LOCALE[currency] ?? "fr-FR", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(amount);
 }
 
-/** Valide grossièrement un format de date YYYY-MM-DD. */
-export function isValidDateParam(value: string | null | undefined): value is string {
-  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+export function formatNumber(value: number, decimals = 0): string {
+  return new Intl.NumberFormat("fr-FR", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(value);
 }
 
-/**
- * Convertit une valeur de statistique API ("55%", "12", null) en number ou null.
- * Gère les pourcentages et les chaînes vides.
- */
-export function parseStatValue(value: number | string | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const trimmed = value.trim();
-  if (trimmed === "" || trimmed === "-") return null;
-  const cleaned = trimmed.replace("%", "").replace(",", ".");
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
+export function formatPercent(value: number, decimals = 0): string {
+  return `${formatNumber(value, decimals)} %`;
 }
 
-/** Mappe le code court de statut API vers une phase simplifiée. */
-export function mapStatusToPhase(statusShort: string): MatchPhase {
-  const s = (statusShort || "").toUpperCase();
-  if (["NS", "TBD"].includes(s)) return "scheduled";
-  if (["1H", "2H", "ET", "P", "BT", "LIVE", "INT"].includes(s)) return "live";
-  if (s === "HT") return "halftime";
-  if (["FT", "AET", "PEN", "WO"].includes(s)) return "finished";
-  if (["PST", "CANC", "ABD", "SUSP"].includes(s)) return "postponed";
-  return "unknown";
+export function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** true si la phase correspond à un match en cours (live ou mi-temps). */
-export function isLivePhase(phase: MatchPhase): boolean {
-  return phase === "live" || phase === "halftime";
+export function formatDelay(minDays: number, maxDays: number): string {
+  if (minDays === maxDays) return `${minDays} j`;
+  return `${minDays}–${maxDays} j`;
 }
 
-/**
- * Extrait un nom de groupe depuis le champ `round`.
- * Ex: "Group Stage - 1" => null, "Group A" => "Group A", "Groupe B" => "Groupe B".
- */
-export function extractGroupName(round: string | null | undefined): string | null {
-  if (!round) return null;
-  const match = round.match(/\b(group|groupe|grupo)\s+([A-H0-9])\b/i);
-  if (match) {
-    return `${capitalize(match[1])} ${match[2].toUpperCase()}`;
-  }
-  return null;
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-}
-
-/** Différence en secondes entre maintenant et un timestamp ISO. */
-export function secondsSince(iso: string | null | undefined): number | null {
-  if (!iso) return null;
+/** Relative time in French ("il y a 5 min", "il y a 2 h", "hier"). */
+export function timeAgo(iso: string, now: Date = new Date()): string {
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return null;
-  return Math.max(0, Math.floor((Date.now() - then) / 1000));
+  const diffMs = now.getTime() - then;
+  const sec = Math.round(diffMs / 1000);
+  const min = Math.round(sec / 60);
+  const hr = Math.round(min / 60);
+  const day = Math.round(hr / 24);
+
+  if (sec < 45) return "à l'instant";
+  if (min < 60) return `il y a ${min} min`;
+  if (hr < 24) return `il y a ${hr} h`;
+  if (day === 1) return "hier";
+  if (day < 7) return `il y a ${day} j`;
+  return new Date(iso).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+  });
 }
 
-/** Formate un âge en secondes vers un libellé court ("12s", "3m", "1h"). */
-export function formatFreshness(seconds: number | null): string {
-  if (seconds === null) return "—";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  return `${Math.floor(seconds / 3600)}h`;
-}
-
-/** Formate une heure de coup d'envoi en HH:MM (locale FR par défaut). */
-export function formatKickoff(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
 
-/** Clamp numérique. */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Stable-ish id for demo objects. */
+export function uid(prefix = "id"): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 9)}${Date.now()
+    .toString(36)
+    .slice(-4)}`;
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** Délai utilitaire (utilisé pour les retries). */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Average of a delivery window. */
+export function avgDelay(minDays: number, maxDays: number): number {
+  return (minDays + maxDays) / 2;
+}
+
+export const FLAG: Record<string, string> = {
+  FR: "🇫🇷",
+  BE: "🇧🇪",
+  CH: "🇨🇭",
+  ES: "🇪🇸",
+  CN: "🇨🇳",
+  DE: "🇩🇪",
+  IT: "🇮🇹",
+  GB: "🇬🇧",
+  US: "🇺🇸",
+};
+
+export function flag(code: string): string {
+  return FLAG[code?.toUpperCase()] ?? "🏳️";
 }

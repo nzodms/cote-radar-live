@@ -1,24 +1,37 @@
-import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import { AppShell } from "@/components/AppShell";
+import { Inter, JetBrains_Mono } from "next/font/google";
+import "./globals.css";
+import { AppShell } from "@/components/layout/AppShell";
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "CoteRadar Live — Analyse live Coupe du monde",
+  title: "SupplierPilot — Pilotez vos fournisseurs",
   description:
-    "Outil privé d'analyse informative des matchs de Coupe du monde (data-first). Aucun résultat garanti.",
-  robots: { index: false, follow: false },
+    "Transformez chaque commande Shopify en demande fournisseur. Comparez les devis, suivez les paiements et choisissez le meilleur fournisseur grâce à l'IA.",
+  applicationName: "SupplierPilot",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#05070f",
+  themeColor: "#f6f8fc",
   width: "device-width",
   initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr">
-      <body className="min-h-screen bg-night-950 font-sans text-slate-200 antialiased">
+    <html lang="fr" className={`${inter.variable} ${mono.variable}`}>
+      <body className="font-sans antialiased">
         <AppShell>{children}</AppShell>
       </body>
     </html>

@@ -1,9 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
-      "path": "/api/cron/sync-world-cup",
-      "schedule": "0 6 * * *"
-    }
-  ]
+  "framework": "nextjs"
 }
