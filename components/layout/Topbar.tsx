@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Popover } from "@/components/ui/popover";
 import { GlobalSearch } from "./GlobalSearch";
 import { NewRequestDialog } from "./NewRequestDialog";
+import { DataSourceBadge } from "./DataSourceBadge";
 import { navItemForPath } from "./nav-config";
 import { ACTIVITY_META } from "@/lib/labels";
 import { cn, timeAgo } from "@/lib/utils";
@@ -57,6 +58,8 @@ export function Topbar() {
           <div className="hidden flex-1 justify-end sm:flex">
             <GlobalSearch />
           </div>
+
+          <DataSourceBadge />
 
           {/* Notifications */}
           <Popover

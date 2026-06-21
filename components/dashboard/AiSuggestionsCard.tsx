@@ -28,13 +28,13 @@ interface Suggestion {
   priority: number;
 }
 
-const TONE_BG: Record<BadgeTone, string> = {
-  neutral: "bg-secondary text-muted-foreground",
-  primary: "bg-primary-soft text-primary",
-  success: "bg-success-soft text-success",
-  warning: "bg-warning-soft text-warning-foreground",
-  danger: "bg-danger-soft text-danger",
-  info: "bg-info-soft text-info",
+const TONE_STYLES: Record<BadgeTone, { box: string; bar: string; chip: string; level: string }> = {
+  neutral: { box: "bg-secondary text-muted-foreground", bar: "bg-muted-foreground/40", chip: "bg-secondary text-muted-foreground", level: "Info" },
+  primary: { box: "bg-primary-soft text-primary ring-primary/15", bar: "bg-primary", chip: "bg-primary-soft text-primary", level: "Recommandé" },
+  success: { box: "bg-success-soft text-success ring-success/15", bar: "bg-success", chip: "bg-success-soft text-success", level: "OK" },
+  warning: { box: "bg-warning-soft text-warning-foreground ring-warning/20", bar: "bg-warning", chip: "bg-warning-soft text-warning-foreground", level: "À faire" },
+  danger: { box: "bg-danger-soft text-danger ring-danger/15", bar: "bg-danger", chip: "bg-danger-soft text-danger", level: "Urgent" },
+  info: { box: "bg-info-soft text-info ring-info/15", bar: "bg-info", chip: "bg-info-soft text-info", level: "Relance" },
 };
 
 export function AiSuggestionsCard({
@@ -62,7 +62,7 @@ export function AiSuggestionsCard({
         icon: AlertTriangle,
         tone: "danger",
         title: `Incident à résoudre · ${o.shopifyOrderNumber}`,
-        description: `Litige en cours avec ${nameOf(o.selectedSupplierId)}. Contactez le fournisseur.`,
+        description: `Litige en cours avec ${nameOf(o.selectedSupplierId)}.`,
         onClick: () => onOpenOrder(o.id),
         priority: 1,
       });
@@ -112,7 +112,7 @@ export function AiSuggestionsCard({
         icon: BellRing,
         tone: "info",
         title: `Relancer ${nameOf(c.supplierId)}`,
-        description: `Aucune réponse depuis ${Math.round(hoursSince)} h pour ${o?.shopifyOrderNumber ?? ""}.`,
+        description: `Sans réponse depuis ${Math.round(hoursSince)} h · ${o?.shopifyOrderNumber ?? ""}.`,
         href: `/inbox?c=${c.id}`,
         priority: 5,
       });
@@ -126,7 +126,7 @@ export function AiSuggestionsCard({
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
       <CardHeader className="flex-row items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary-gradient shadow-glow-soft">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-gradient shadow-glow-soft">
             <Sparkles className="h-[18px] w-[18px] text-white" />
           </div>
           <div>
@@ -134,30 +134,40 @@ export function AiSuggestionsCard({
               Tour de contrôle IA
               <StatusDot color="bg-primary" size="sm" />
             </CardTitle>
-            <p className="text-sm text-muted-foreground">Vos prochaines actions prioritaires</p>
+            <p className="text-sm text-muted-foreground">Vos actions prioritaires</p>
           </div>
         </div>
+        {top.length > 0 && (
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-2xs font-semibold text-muted-foreground tabular-nums">
+            {top.length} action{top.length > 1 ? "s" : ""}
+          </span>
+        )}
       </CardHeader>
 
       <div className="px-2 pb-2">
         {top.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+          <p className="px-3 py-8 text-center text-sm text-muted-foreground">
             Rien d&apos;urgent. Tout est sous contrôle ✨
           </p>
         ) : (
           <div className="space-y-1">
             {top.map((s) => {
               const Icon = s.icon;
+              const st = TONE_STYLES[s.tone];
               const inner = (
-                <div className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-secondary/60">
-                  <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONE_BG[s.tone])}>
-                    <Icon className="h-4 w-4" />
+                <div className="group relative flex w-full items-center gap-3 rounded-xl py-2.5 pl-4 pr-2.5 text-left transition-colors hover:bg-secondary/60">
+                  <span className={cn("absolute bottom-0 left-0 top-0 my-auto h-7 w-1 rounded-r-full", st.bar)} />
+                  <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset", st.box)}>
+                    <Icon className="h-[18px] w-[18px]" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{s.title}</div>
                     <div className="truncate text-xs text-muted-foreground">{s.description}</div>
                   </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+                  <span className={cn("hidden shrink-0 rounded-full px-2 py-0.5 text-2xs font-semibold sm:inline-flex", st.chip)}>
+                    {st.level}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5" />
                 </div>
               );
               return s.href ? (

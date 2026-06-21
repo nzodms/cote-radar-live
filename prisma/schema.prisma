@@ -1,0 +1,191 @@
+// SupplierPilot — forward-looking Prisma schema.
+//
+// NOT yet wired into the app. The V1 runs on the client Zustand store
+// (persisted to localStorage) + server-side Shopify adapters. This schema
+// documents the production data model so persistence can be added next:
+//
+//   npm i -D prisma && npm i @prisma/client
+//   npx prisma migrate dev --name init
+//
+// The models mirror types/index.ts so the adapters map 1:1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ShopConnection {
+  id          String    @id @default(cuid())
+  shopDomain  String    @unique
+  apiVersion  String    @default("2026-04")
+  // The access token should live in a secrets manager / encrypted at rest.
+  installedAt DateTime  @default(now())
+  lastSyncAt  DateTime?
+  syncRuns    SyncRun[]
+  orders      Order[]
+}
+
+model SyncRun {
+  id          String         @id @default(cuid())
+  shop        ShopConnection @relation(fields: [shopId], references: [id])
+  shopId      String
+  resource    String // "orders" | "products"
+  status      String // "success" | "error"
+  count       Int            @default(0)
+  error       String?
+  createdAt   DateTime       @default(now())
+}
+
+model Supplier {
+  id               String          @id @default(cuid())
+  name             String
+  country          String
+  countryCode      String
+  specialty        String
+  whatsappNumber   String
+  language         String          @default("fr")
+  reliabilityScore Int             @default(80)
+  performance90d   Int             @default(80)
+  averageDelayDays Int             @default(0)
+  averageCost      Float           @default(0)
+  totalOrders      Int             @default(0)
+  totalPaid        Float           @default(0)
+  incidents        Int             @default(0)
+  tags             String[]
+  notes            String          @default("")
+  preferred        Boolean         @default(false)
+  blocked          Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  quotes           SupplierQuote[]
+  conversations    Conversation[]
+  purchases        Purchase[]
+  orders           Order[]
+}
+
+model Order {
+  id                  String          @id @default(cuid())
+  shopId              String?
+  shop                ShopConnection? @relation(fields: [shopId], references: [id])
+  shopifyOrderId      String?         @unique
+  shopifyOrderNumber  String
+  productName         String
+  productImage        String
+  variant             String          @default("")
+  size                String          @default("")
+  color               String          @default("")
+  quantity            Int             @default(1)
+  country             String
+  countryCode         String
+  customerName        String          @default("")
+  salePrice           Float
+  currency            String          @default("EUR")
+  targetMaxCost       Float
+  status              String          @default("awaiting_reply")
+  paymentStatus       String          @default("pending")
+  trackingStatus      String          @default("none")
+  trackingNumber      String?
+  paymentDate         DateTime?
+  expectedTrackingDate DateTime?
+  selectedSupplier    Supplier?       @relation(fields: [selectedSupplierId], references: [id])
+  selectedSupplierId  String?
+  createdAt           DateTime        @default(now())
+  lineItems           OrderLineItem[]
+  quotes              SupplierQuote[]
+  conversations       Conversation[]
+  purchase            Purchase?
+}
+
+model OrderLineItem {
+  id            String  @id @default(cuid())
+  order         Order   @relation(fields: [orderId], references: [id])
+  orderId       String
+  title         String
+  variantTitle  String?
+  sku           String?
+  quantity      Int     @default(1)
+  price         Float
+  image         String?
+  productId     String?
+  variantId     String?
+}
+
+model SupplierQuote {
+  id              String   @id @default(cuid())
+  order           Order    @relation(fields: [orderId], references: [id])
+  orderId         String
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  supplierId      String
+  productCost     Float
+  shippingCost    Float
+  totalCost       Float
+  currency        String   @default("EUR")
+  deliveryMinDays Int
+  deliveryMaxDays Int
+  stockStatus     String
+  reliabilityScore Int
+  performance90d  Int
+  incidents       Int      @default(0)
+  notes           String   @default("")
+  createdAt       DateTime @default(now())
+}
+
+model Conversation {
+  id         String    @id @default(cuid())
+  supplier   Supplier  @relation(fields: [supplierId], references: [id])
+  supplierId String
+  order      Order     @relation(fields: [orderId], references: [id])
+  orderId    String
+  unreadCount Int      @default(0)
+  status     String    @default("active")
+  lastMessageAt DateTime @default(now())
+  messages   Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  senderType     String // "merchant" | "supplier" | "system"
+  content        String
+  channel        String       @default("whatsapp")
+  status         String?
+  timestamp      DateTime     @default(now())
+}
+
+model Purchase {
+  id                  String    @id @default(cuid())
+  order               Order     @relation(fields: [orderId], references: [id])
+  orderId             String    @unique
+  supplier            Supplier  @relation(fields: [supplierId], references: [id])
+  supplierId          String
+  amount              Float
+  currency            String    @default("EUR")
+  paymentStatus       String    @default("to_pay")
+  paymentDate         DateTime?
+  expectedTrackingDate DateTime?
+  trackingNumber      String?
+  status              String    @default("to_pay")
+  createdAt           DateTime  @default(now())
+}
+
+model AIRules {
+  id                    String  @id @default("default")
+  minimumMarginPercent  Int     @default(35)
+  maximumDeliveryDays   Int     @default(15)
+  manualValidationAbove Float   @default(500)
+  autoReminderHours     Int     @default(24)
+  preferConfirmedStock  Boolean @default(true)
+  excludeReliabilityBelow Int   @default(70)
+  preferredSupplierIds  String[]
+  blockedSupplierIds    String[]
+  allowedCountries      String[]
+  weightPrice           Int     @default(30)
+  weightDelay           Int     @default(20)
+  weightReliability     Int     @default(20)
+  weightStock           Int     @default(15)
+  weightMargin          Int     @default(15)
+}

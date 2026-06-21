@@ -14,9 +14,30 @@ import type {
 } from "@/types";
 import type { SupplierFormValues } from "@/schemas";
 import type { ExtractedQuote } from "@/lib/ai/extractQuoteFromMessage";
+import type { ShopifyProductSummary } from "@/lib/shopify/types";
 import { recommendSupplier } from "@/lib/recommendation/recommendSupplier";
 import { initialsFromName, uid } from "@/lib/utils";
 import { makeInitialData } from "@/lib/data/seed";
+
+export type DataSource = "demo" | "shopify" | "error";
+
+export interface ShopifyMeta {
+  shopDomain: string | null;
+  apiVersion: string | null;
+  lastSyncAt: string | null;
+  ordersImported: number;
+  productsImported: number;
+  error: string | null;
+}
+
+const INITIAL_SHOPIFY: ShopifyMeta = {
+  shopDomain: null,
+  apiVersion: null,
+  lastSyncAt: null,
+  ordersImported: 0,
+  productsImported: 0,
+  error: null,
+};
 
 interface ContactSuppliersInput {
   orderId: string;
@@ -41,6 +62,11 @@ export interface AppState {
   conversations: Conversation[];
   rules: AIRules;
   activity: ActivityEvent[];
+
+  // ---- data source / Shopify ----
+  dataSource: DataSource;
+  shopify: ShopifyMeta;
+  shopifyProducts: ShopifyProductSummary[];
 
   // ---- suppliers ----
   addSupplier: (values: SupplierFormValues) => Supplier;
@@ -73,6 +99,15 @@ export interface AppState {
   // ---- rules ----
   updateRules: (patch: Partial<AIRules>) => void;
 
+  // ---- shopify ----
+  importShopifyOrders: (orders: Order[], meta: { shopDomain?: string; apiVersion?: string }) => void;
+  importShopifyProducts: (
+    products: ShopifyProductSummary[],
+    meta?: { shopDomain?: string; apiVersion?: string },
+  ) => void;
+  setShopifyError: (message: string) => void;
+  loadDemoData: () => void;
+
   // ---- misc ----
   pushActivity: (event: Omit<ActivityEvent, "id" | "timestamp">) => void;
   resetDemo: () => void;
@@ -89,6 +124,9 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       hydrated: false,
       ...init,
+      dataSource: "demo" as DataSource,
+      shopify: { ...INITIAL_SHOPIFY },
+      shopifyProducts: [],
 
       // ---------------------------------------------------------------- suppliers
       addSupplier: (values) => {
@@ -562,6 +600,61 @@ export const useStore = create<AppState>()(
         get().recomputeAllRecommendations();
       },
 
+      // ------------------------------------------------------------------ shopify
+      importShopifyOrders: (orders, meta) => {
+        set((s) => ({
+          orders,
+          // Quotes/conversations from demo orders no longer apply to real orders.
+          quotes: [],
+          conversations: [],
+          dataSource: "shopify",
+          shopify: {
+            ...s.shopify,
+            shopDomain: meta.shopDomain ?? s.shopify.shopDomain,
+            apiVersion: meta.apiVersion ?? s.shopify.apiVersion,
+            lastSyncAt: new Date().toISOString(),
+            ordersImported: orders.length,
+            error: null,
+          },
+          activity: [
+            {
+              id: uid("act"),
+              type: "system" as const,
+              title: "Synchronisation Shopify",
+              description: `${orders.length} commande${orders.length > 1 ? "s" : ""} importée${
+                orders.length > 1 ? "s" : ""
+              } depuis Shopify`,
+              timestamp: new Date().toISOString(),
+            },
+            ...s.activity,
+          ].slice(0, 60),
+        }));
+        get().recomputeAllRecommendations();
+      },
+
+      importShopifyProducts: (products, meta) =>
+        set((s) => ({
+          shopifyProducts: products,
+          shopify: {
+            ...s.shopify,
+            productsImported: products.length,
+            lastSyncAt: new Date().toISOString(),
+            shopDomain: meta?.shopDomain ?? s.shopify.shopDomain,
+            apiVersion: meta?.apiVersion ?? s.shopify.apiVersion,
+          },
+        })),
+
+      setShopifyError: (message) =>
+        set((s) => ({ dataSource: "error", shopify: { ...s.shopify, error: message } })),
+
+      loadDemoData: () =>
+        set({
+          ...makeInitialData(),
+          dataSource: "demo",
+          shopify: { ...INITIAL_SHOPIFY },
+          shopifyProducts: [],
+        }),
+
       // --------------------------------------------------------------------- misc
       pushActivity: (event) =>
         set((s) => ({
@@ -571,7 +664,13 @@ export const useStore = create<AppState>()(
           ].slice(0, 60),
         })),
 
-      resetDemo: () => set({ ...makeInitialData() }),
+      resetDemo: () =>
+        set({
+          ...makeInitialData(),
+          dataSource: "demo",
+          shopify: { ...INITIAL_SHOPIFY },
+          shopifyProducts: [],
+        }),
     }),
     {
       name: "supplierpilot-v1",
@@ -585,6 +684,9 @@ export const useStore = create<AppState>()(
         conversations: state.conversations,
         rules: state.rules,
         activity: state.activity,
+        dataSource: state.dataSource,
+        shopify: state.shopify,
+        shopifyProducts: state.shopifyProducts,
       }),
     },
   ),

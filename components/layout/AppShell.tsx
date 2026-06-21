@@ -17,7 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <StoreHydration />
       <Sidebar />
 
-      <div className="relative lg:pl-[268px]">
+      <div className="relative lg:pl-[264px]">
         <Topbar />
         <main className="mx-auto w-full max-w-[1480px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pb-10">
           <PageTransition>{children}</PageTransition>

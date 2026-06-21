@@ -6,6 +6,7 @@ import {
   Wallet,
   Factory,
   SlidersHorizontal,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,6 +83,12 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/settings",
         icon: SlidersHorizontal,
         subtitle: "Réglez la recommandation automatique et l'automatisation",
+      },
+      {
+        label: "Connexion Shopify",
+        href: "/connection",
+        icon: Plug,
+        subtitle: "Connectez votre boutique et synchronisez vos commandes",
       },
     ],
   },

@@ -7,6 +7,7 @@ interface SparklineProps {
   fill?: string;
   width?: number;
   height?: number;
+  dot?: boolean;
 }
 
 /** Tiny inline area sparkline (pure SVG, no dependency). */
@@ -17,6 +18,7 @@ export function Sparkline({
   fill = "hsl(var(--primary) / 0.12)",
   width = 96,
   height = 32,
+  dot = true,
 }: SparklineProps) {
   if (data.length < 2) return null;
   const min = Math.min(...data);
@@ -42,8 +44,8 @@ export function Sparkline({
       preserveAspectRatio="none"
     >
       <path d={area} fill={fill} />
-      <path d={line} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r={2.5} fill={stroke} />
+      <path d={line} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      {dot && <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r={2.5} fill={stroke} />}
     </svg>
   );
 }

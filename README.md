@@ -79,12 +79,15 @@ layer, `wa.me` links, and in-memory demo data. Copy `.env.example` → `.env.loc
 |---------|---------|-----------|
 | `ANTHROPIC_API_KEY` | Real Claude for message generation + quote extraction | Deterministic mock layer |
 | `ANTHROPIC_MODEL` | Claude model id (default `claude-sonnet-4-6`) | — |
-| `SHOPIFY_WEBHOOK_SECRET` | Verify `orders/create` HMAC | Demo accepts unsigned payloads |
-| `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_ADMIN_API_TOKEN` | Future Admin API reads | Demo uses mock orders |
+| `SHOPIFY_SHOP_DOMAIN` | Your store domain (`my-store` or `my-store.myshopify.com`) | Mode démo |
+| `SHOPIFY_ADMIN_ACCESS_TOKEN` | Custom-app Admin API token (`shpat_…`), server-only | Mode démo |
+| `SHOPIFY_API_VERSION` | Admin API version (default `2026-04`) | — |
+| `SHOPIFY_WEBHOOK_SECRET` | Verify `orders/create` HMAC | Webhook runs in insecure dev mode |
+| `SUPPLIERPILOT_TARGET_COST_RATIO` | Default cost target as a ratio of sale price (default `0.38`) | — |
 | `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_BUSINESS_ACCOUNT_ID` | WhatsApp Cloud API sending | Generates `wa.me` links + internal inbox sends |
 
-**No secret is ever exposed client-side** — Claude and WhatsApp Cloud calls run
-only in server API routes / server modules.
+**No secret is ever exposed client-side** — Shopify, Claude and WhatsApp Cloud
+calls run only in server API routes / server modules.
 
 ---
 
@@ -94,13 +97,24 @@ only in server API routes / server modules.
 |------|--------------|--------------------|
 | **Data** | `lib/data/seed.ts` → Zustand store persisted to `localStorage` | Replace store hydration with API/DB reads; the same `types/` model is the contract |
 | **AI** | `lib/ai/*` fall back to deterministic templates / regex parser | Set `ANTHROPIC_API_KEY`; the same functions call Claude automatically |
-| **Shopify** | `POST /api/shopify/webhooks/orders-create` validates (Zod) + normalizes a demo payload and echoes it | Add HMAC verification + persistence; `normalizeShopifyOrder` already maps to the internal model |
+| **Shopify** | Demo orders by default. A **real Admin GraphQL layer** is built in (`lib/shopify/client.ts`) — set env vars + use **Connexion Shopify** to sync real orders/products | Already live: test connection, sync orders/products, HMAC webhook |
 | **WhatsApp** | `wa.me` links + internal inbox logging | Set Cloud API creds; `sendWhatsAppMessage` already posts to the Graph API |
+
+### Shopify connection (real data)
+Set the env vars below, open **Connexion Shopify** in the app, then *Tester la connexion* → *Synchroniser les commandes*. Without env vars the app stays in **Mode démo** (badge in the top bar).
+
+```bash
+SHOPIFY_SHOP_DOMAIN=ma-boutique.myshopify.com   # or just "ma-boutique"
+SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxxxxxx        # custom app Admin token (server-only)
+SHOPIFY_API_VERSION=2026-04
+SHOPIFY_WEBHOOK_SECRET=                           # optional, enables HMAC on the webhook
+```
+Required Admin scopes: `read_orders`, `read_products`, `read_customers`, `read_inventory` (customer name/country need protected customer-data access). Endpoints: `GET /api/shopify/test-connection`, `POST /api/shopify/sync/orders`, `POST /api/shopify/sync/products`, `POST /api/shopify/webhooks/orders-create`.
 
 ### Try the adapters
 ```bash
-# Shopify normalize (sample)
-curl localhost:3000/api/shopify/webhooks/orders-create
+# Shopify connection test (returns configured/ok without exposing the token)
+curl localhost:3000/api/shopify/test-connection
 
 # AI message (mock unless ANTHROPIC_API_KEY set)
 curl -X POST localhost:3000/api/ai/generate-message -H 'Content-Type: application/json' \

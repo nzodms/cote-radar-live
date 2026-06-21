@@ -36,7 +36,7 @@ export function OrdersToProcessCard({
         </div>
         <Link
           href="/orders"
-          className="inline-flex items-center gap-1 text-sm font-medium text-primary transition-colors hover:text-primary-deep"
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
         >
           Voir tout
           <ArrowRight className="h-4 w-4" />
@@ -58,37 +58,50 @@ export function OrdersToProcessCard({
                   className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-secondary/60"
                 >
                   <ProductImage src={order.productImage} alt={order.productName} className="h-11 w-11 shrink-0" rounded="rounded-lg" />
+
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground">{order.shopifyOrderNumber}</span>
-                      <span className="text-2xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                      <span className="font-semibold">{order.shopifyOrderNumber}</span>
+                      <span aria-hidden>·</span>
+                      <span className="truncate">
                         {flag(order.countryCode)} {order.country}
                       </span>
                     </div>
                     <div className="truncate text-sm font-medium">{order.productName}</div>
                   </div>
 
-                  <div className="hidden items-center gap-2 sm:flex">
+                  {/* quotes */}
+                  <div className="hidden w-[68px] justify-end sm:flex">
                     {quoteCount > 0 ? (
                       <Badge tone="info" size="sm">{quoteCount} devis</Badge>
                     ) : (
-                      <Badge tone="neutral" size="sm">En attente</Badge>
+                      <Badge tone="neutral" size="sm">0 devis</Badge>
                     )}
-                    {recommended && (
+                  </div>
+
+                  {/* recommended supplier */}
+                  <div className="hidden w-7 justify-center md:flex">
+                    {recommended ? (
                       <Tooltip content={`Recommandé : ${recommended.name}`}>
-                        <span className="flex items-center gap-1 rounded-full bg-primary-soft px-1.5 py-0.5">
-                          <Sparkles className="h-3 w-3 text-primary" />
-                          <Avatar initials={recommended.initials} seed={recommended.id} size="sm" className="!h-5 !w-5" />
+                        <span className="relative">
+                          <Avatar initials={recommended.initials} seed={recommended.id} size="sm" className="!h-6 !w-6 text-[9px]" />
+                          <Sparkles className="absolute -right-1 -top-1 h-2.5 w-2.5 text-primary" />
                         </span>
                       </Tooltip>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
                     )}
                   </div>
 
                   <div className="hidden w-20 text-right text-sm font-semibold tabular-nums md:block">
                     {formatCurrency(order.salePrice)}
                   </div>
-                  <OrderStatusBadge status={order.status} className="hidden lg:inline-flex" />
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+
+                  <div className="hidden w-[104px] justify-end lg:flex">
+                    <OrderStatusBadge status={order.status} />
+                  </div>
+
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5" />
                 </button>
               );
             })}

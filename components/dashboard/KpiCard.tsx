@@ -29,7 +29,6 @@ interface KpiCardProps {
   trendGood?: boolean;
   spark?: number[];
   href?: string;
-  hint?: string;
   loading?: boolean;
   index?: number;
 }
@@ -44,22 +43,16 @@ export function KpiCard({
   trendGood = true,
   spark = [],
   href,
-  hint,
   loading,
   index = 0,
 }: KpiCardProps) {
   const t = TONES[tone];
 
   const body = (
-    <Card
-      interactive={!!href}
-      className={cn(
-        "group relative h-full overflow-hidden p-4",
-        href && "cursor-pointer",
-      )}
-    >
-      <div className={cn("pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-gradient-to-br to-transparent blur-2xl", t.glow)} />
-      <div className="relative flex items-start justify-between">
+    <Card interactive={!!href} className={cn("group relative flex h-full flex-col overflow-hidden p-4", href && "cursor-pointer")}>
+      <div className={cn("pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-gradient-to-br to-transparent blur-2xl", t.glow)} />
+
+      <div className="relative flex items-center justify-between">
         <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl", t.icon)}>
           <Icon className="h-[18px] w-[18px]" />
         </div>
@@ -76,20 +69,23 @@ export function KpiCard({
         )}
       </div>
 
-      <div className="relative mt-3 flex items-end justify-between gap-2">
-        <div className="min-w-0">
-          {loading ? (
-            <Skeleton className="h-8 w-16" />
-          ) : (
-            <div className="text-[1.7rem] font-semibold leading-none tracking-tight tabular-nums">{value}</div>
-          )}
-          <div className="mt-1.5 truncate text-xs font-medium text-muted-foreground">{label}</div>
-        </div>
-        {spark.length > 1 && !loading && (
-          <Sparkline data={spark} stroke={t.spark} fill={t.sparkFill} width={72} height={30} className="shrink-0 opacity-90" />
+      <div className="relative mt-3.5">
+        {loading ? (
+          <Skeleton className="h-7 w-14" />
+        ) : (
+          <div className="text-[1.6rem] font-semibold leading-none tracking-tight tabular-nums">{value}</div>
         )}
       </div>
-      {hint && !loading && <p className="relative mt-2 text-2xs text-muted-foreground/80">{hint}</p>}
+
+      <div className="relative mt-1.5 min-h-[2.1em] text-xs font-medium leading-snug text-muted-foreground">
+        {loading ? <Skeleton className="h-3 w-20" /> : label}
+      </div>
+
+      {spark.length > 1 && !loading && (
+        <div className="relative mt-auto pt-3">
+          <Sparkline data={spark} stroke={t.spark} fill={t.sparkFill} width={120} height={26} dot={false} className="h-7 w-full" />
+        </div>
+      )}
     </Card>
   );
 
