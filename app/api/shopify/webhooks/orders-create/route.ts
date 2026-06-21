@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { shopifyOrderPayloadSchema } from "@/schemas";
-import { normalizeShopifyOrder } from "@/lib/shopify/normalize";
+import { normalizeShopifyOrder, type NormalizedLineItem } from "@/lib/shopify/normalize";
 import { sampleShopifyOrder } from "@/lib/shopify/mockOrders";
+import { getShopifyConfig } from "@/lib/shopify/client";
+import { isDbConfigured } from "@/lib/db/prisma";
+import { upsertShopifyOrders } from "@/lib/store/ordersDb";
+import { ensureShop, recordRun } from "@/lib/store/syncDb";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +20,8 @@ function verifyHmac(rawBody: string, header: string | null, secret: string): boo
 
 /**
  * Shopify "orders/create" webhook.
- *  - Verifies the HMAC signature when SHOPIFY_WEBHOOK_SECRET is set.
- *  - Without a secret it runs in clearly-marked insecure dev mode.
- *  - Normalizes the payload into the internal Order model.
+ *  - Verifies the HMAC signature when SHOPIFY_WEBHOOK_SECRET is set (else dev mode).
+ *  - Normalizes the payload and persists it (dedupe by Shopify id) when a DB is configured.
  */
 export async function POST(request: Request) {
   const raw = await request.text();
@@ -33,14 +36,14 @@ export async function POST(request: Request) {
     devMode = true; // No secret configured — accept but flag as insecure.
   }
 
-  let body: unknown;
+  let parsedBody: unknown;
   try {
-    body = JSON.parse(raw);
+    parsedBody = JSON.parse(raw);
   } catch {
     return NextResponse.json({ ok: false, error: "Corps JSON invalide" }, { status: 400 });
   }
 
-  const parsed = shopifyOrderPayloadSchema.safeParse(body);
+  const parsed = shopifyOrderPayloadSchema.safeParse(parsedBody);
   if (!parsed.success) {
     return NextResponse.json(
       { ok: false, error: "Payload de commande Shopify invalide", issues: parsed.error.flatten() },
@@ -48,10 +51,50 @@ export async function POST(request: Request) {
     );
   }
 
-  // In production: persist to DB / enqueue for processing. Here we normalize + echo.
-  const order = normalizeShopifyOrder(parsed.data);
+  // Deterministic id enables dedupe on webhook re-delivery.
+  const order = { ...normalizeShopifyOrder(parsed.data), id: `shop_${parsed.data.id}` };
 
-  return NextResponse.json({ ok: true, devMode, order }, { status: 201 });
+  let persisted = false;
+  if (isDbConfigured()) {
+    try {
+      const cfg = getShopifyConfig();
+      const shopId = cfg.shop ? await ensureShop(cfg.shop, cfg.apiVersion) : null;
+      const lineItems: NormalizedLineItem[] = (parsed.data.line_items ?? []).map((li) => ({
+        title: li.title,
+        variantTitle: li.variant_title ?? null,
+        sku: li.sku ?? null,
+        quantity: li.quantity,
+        price: parseFloat(li.price) || 0,
+        image: li.image?.src ?? null,
+        productId: null,
+        variantId: null,
+      }));
+      const counts = await upsertShopifyOrders(
+        [
+          {
+            order,
+            shopifyOrderId: String(parsed.data.id),
+            financialStatus: parsed.data.financial_status ?? null,
+            fulfillmentStatus: parsed.data.fulfillment_status ?? null,
+            lineItems,
+          },
+        ],
+        shopId,
+      );
+      await recordRun({
+        shopId,
+        resource: "orders",
+        imported: counts.imported,
+        updated: counts.updated,
+        total: counts.imported + counts.updated,
+      });
+      persisted = true;
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ ok: true, devMode, persisted, order }, { status: 201 });
 }
 
 /** GET returns a sample normalized order so the adapter is easy to test. */

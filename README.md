@@ -77,6 +77,7 @@ layer, `wa.me` links, and in-memory demo data. Copy `.env.example` → `.env.loc
 
 | Variable | Purpose | Without it |
 |---------|---------|-----------|
+| `DATABASE_URL` | Postgres connection — DB becomes the source of truth | Mode démo (localStorage) |
 | `ANTHROPIC_API_KEY` | Real Claude for message generation + quote extraction | Deterministic mock layer |
 | `ANTHROPIC_MODEL` | Claude model id (default `claude-sonnet-4-6`) | — |
 | `SHOPIFY_SHOP_DOMAIN` | Your store domain (`my-store` or `my-store.myshopify.com`) | Mode démo |
@@ -95,7 +96,7 @@ calls run only in server API routes / server modules.
 
 | Area | V1 behaviour | Production swap-in |
 |------|--------------|--------------------|
-| **Data** | `lib/data/seed.ts` → Zustand store persisted to `localStorage` | Replace store hydration with API/DB reads; the same `types/` model is the contract |
+| **Data** | No `DATABASE_URL` → Zustand store on `localStorage`. With `DATABASE_URL` → **Prisma + Postgres is the source of truth** (write-through) | Already live — see *Database & persistence* below |
 | **AI** | `lib/ai/*` fall back to deterministic templates / regex parser | Set `ANTHROPIC_API_KEY`; the same functions call Claude automatically |
 | **Shopify** | Demo orders by default. A **real Admin GraphQL layer** is built in (`lib/shopify/client.ts`) — set env vars + use **Connexion Shopify** to sync real orders/products | Already live: test connection, sync orders/products, HMAC webhook |
 | **WhatsApp** | `wa.me` links + internal inbox logging | Set Cloud API creds; `sendWhatsAppMessage` already posts to the Graph API |
@@ -110,6 +111,26 @@ SHOPIFY_API_VERSION=2026-04
 SHOPIFY_WEBHOOK_SECRET=                           # optional, enables HMAC on the webhook
 ```
 Required Admin scopes: `read_orders`, `read_products`, `read_customers`, `read_inventory` (customer name/country need protected customer-data access). Endpoints: `GET /api/shopify/test-connection`, `POST /api/shopify/sync/orders`, `POST /api/shopify/sync/products`, `POST /api/shopify/webhooks/orders-create`.
+
+### Database & persistence (Prisma + PostgreSQL)
+When `DATABASE_URL` is set, the DB is the source of truth: the client bootstraps from `GET /api/state` and **writes through** every change to `PUT /api/state`. Shopify syncs upsert orders + line items (dedupe by Shopify id) and log `SyncRun`s. Without `DATABASE_URL` the app runs on the localStorage demo store — nothing breaks.
+
+```bash
+# 1. Point at a Postgres (Neon / Supabase / Vercel Postgres / local)
+echo 'DATABASE_URL="postgresql://user:pass@host:5432/supplierpilot?sslmode=require"' >> .env.local
+
+# 2. Create the tables
+npm run db:migrate          # prod: applies prisma/migrations (prisma migrate deploy)
+#   or, for quick local dev:
+npm run db:push             # pushes the schema without migration files
+
+# 3. (optional) Seed the demo dataset into the DB
+npm run db:seed
+
+# 4. Run — the top-bar badge + /api/state now read/write Postgres
+npm run dev
+```
+Data-access layer: `lib/db/prisma.ts` + `lib/store/{suppliersDb,ordersDb,conversationsDb,purchasesDb,settingsDb,syncDb}.ts`. Models: `prisma/schema.prisma`. `npm run db:studio` opens Prisma Studio. Tip: in DB mode you can also click **Connexion Shopify → Utiliser les données démo** to populate the DB with the demo dataset from the UI.
 
 ### Try the adapters
 ```bash

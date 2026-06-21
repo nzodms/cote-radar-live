@@ -21,6 +21,19 @@ import { makeInitialData } from "@/lib/data/seed";
 
 export type DataSource = "demo" | "shopify" | "error";
 
+export type PersistMode = "unknown" | "demo" | "db";
+
+export interface ServerState {
+  suppliers: Supplier[];
+  orders: Order[];
+  quotes: SupplierQuote[];
+  conversations: Conversation[];
+  rules: AIRules;
+  dataSource: DataSource;
+  shopify: ShopifyMeta;
+  shopifyProducts: ShopifyProductSummary[];
+}
+
 export interface ShopifyMeta {
   shopDomain: string | null;
   apiVersion: string | null;
@@ -56,6 +69,7 @@ interface AddQuoteInput {
 
 export interface AppState {
   hydrated: boolean;
+  persistMode: PersistMode;
   suppliers: Supplier[];
   orders: Order[];
   quotes: SupplierQuote[];
@@ -107,6 +121,7 @@ export interface AppState {
   ) => void;
   setShopifyError: (message: string) => void;
   loadDemoData: () => void;
+  loadServerState: (payload: ServerState) => void;
 
   // ---- misc ----
   pushActivity: (event: Omit<ActivityEvent, "id" | "timestamp">) => void;
@@ -123,6 +138,7 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       hydrated: false,
+      persistMode: "unknown" as PersistMode,
       ...init,
       dataSource: "demo" as DataSource,
       shopify: { ...INITIAL_SHOPIFY },
@@ -654,6 +670,22 @@ export const useStore = create<AppState>()(
           shopify: { ...INITIAL_SHOPIFY },
           shopifyProducts: [],
         }),
+
+      loadServerState: (payload) => {
+        set({
+          suppliers: payload.suppliers,
+          orders: payload.orders,
+          quotes: payload.quotes,
+          conversations: payload.conversations,
+          rules: payload.rules,
+          dataSource: payload.dataSource,
+          shopify: payload.shopify,
+          shopifyProducts: payload.shopifyProducts,
+          persistMode: "db",
+          hydrated: true,
+        });
+        get().recomputeAllRecommendations();
+      },
 
       // --------------------------------------------------------------------- misc
       pushActivity: (event) =>

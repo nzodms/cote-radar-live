@@ -5,13 +5,24 @@
   "description": "SupplierPilot — Shopify + WhatsApp + AI supplier operations for premium e-commerce merchants.",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
+    "@prisma/client": "^5.19.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.3.24",
@@ -31,8 +42,10 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.35",
     "postcss": "^8.4.40",
+    "prisma": "^5.19.1",
     "tailwindcss": "^3.4.7",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.16.2",
     "typescript": "^5.5.4"
   }
 }

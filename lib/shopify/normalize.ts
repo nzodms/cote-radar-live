@@ -146,6 +146,31 @@ export function normalizeGraphOrder(node: ShopifyGraphOrder): Order {
   };
 }
 
+export interface NormalizedLineItem {
+  title: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantity: number;
+  price: number;
+  image: string | null;
+  productId: string | null;
+  variantId: string | null;
+}
+
+/** Extract all line items from a GraphQL order node for DB persistence. */
+export function normalizeGraphLineItems(node: ShopifyGraphOrder): NormalizedLineItem[] {
+  return (node.lineItems?.edges ?? []).map(({ node: li }) => ({
+    title: li.title,
+    variantTitle: li.variant?.title && li.variant.title !== "Default Title" ? li.variant.title : null,
+    sku: li.variant?.sku ?? null,
+    quantity: li.quantity,
+    price: parseFloat(li.originalUnitPriceSet?.shopMoney?.amount || "0") || 0,
+    image: li.image?.url || li.variant?.image?.url || li.variant?.product?.featuredImage?.url || null,
+    productId: li.variant?.product?.id ?? null,
+    variantId: li.variant?.id ?? null,
+  }));
+}
+
 export function normalizeGraphProduct(node: ShopifyGraphProduct): ShopifyProductSummary {
   return {
     id: node.id,

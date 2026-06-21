@@ -11,27 +11,104 @@ import type {
 import { recommendSupplier, marginForQuote } from "@/lib/recommendation/recommendSupplier";
 import { useStore, type AppState } from "./useStore";
 
-/** Returns true once the persisted store has rehydrated on the client. */
+/** Returns true once the store has hydrated (from DB or localStorage). */
 export function useHydrated(): boolean {
   return useStore((s) => s.hydrated);
 }
 
-/** Triggers persist rehydration + recommendation refresh after mount. */
+/** The slice of state persisted to the database (write-through snapshot). */
+export function snapshotForDb(s: AppState) {
+  return {
+    suppliers: s.suppliers,
+    orders: s.orders,
+    quotes: s.quotes,
+    conversations: s.conversations,
+    rules: s.rules,
+  };
+}
+
+/**
+ * Bootstraps the store on mount:
+ *  - If the server reports DB mode, load state from the database and enable
+ *    debounced write-through persistence (DB is the source of truth).
+ *  - Otherwise fall back to the localStorage demo store (unchanged behavior).
+ */
 export function useStoreHydration() {
   const [done, setDone] = useState(false);
+
   useEffect(() => {
     let active = true;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    let cleanup: (() => void) | undefined;
+    let suppress = true;
+
+    const saveSnapshot = (keepalive = false) => {
+      const s = useStore.getState();
+      if (s.persistMode !== "db" || !s.hydrated) return;
+      void fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshotForDb(s)),
+        keepalive,
+      }).catch(() => {});
+    };
+
+    const enableWriteThrough = () => {
+      const unsub = useStore.subscribe((state) => {
+        if (state.persistMode !== "db" || !state.hydrated || suppress) return;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => saveSnapshot(), 700);
+      });
+      const onHide = () => saveSnapshot(true);
+      window.addEventListener("pagehide", onHide);
+      cleanup = () => {
+        unsub();
+        window.removeEventListener("pagehide", onHide);
+      };
+      // Ignore the state changes caused by the initial load.
+      setTimeout(() => {
+        suppress = false;
+      }, 150);
+    };
+
     (async () => {
-      await useStore.persist.rehydrate();
+      try {
+        const res = await fetch("/api/state", { cache: "no-store" });
+        const data = await res.json();
+        if (!active) return;
+        if (data?.mode === "db") {
+          useStore.getState().loadServerState({
+            suppliers: data.suppliers ?? [],
+            orders: data.orders ?? [],
+            quotes: data.quotes ?? [],
+            conversations: data.conversations ?? [],
+            rules: data.rules,
+            dataSource: data.dataSource ?? "demo",
+            shopify: data.shopify,
+            shopifyProducts: data.shopifyProducts ?? [],
+          });
+          enableWriteThrough();
+          setDone(true);
+          return;
+        }
+      } catch {
+        /* fall through to demo mode */
+      }
       if (!active) return;
-      useStore.setState({ hydrated: true });
+      // Demo mode: localStorage (unchanged V1 behavior).
+      await useStore.persist.rehydrate();
+      useStore.setState({ hydrated: true, persistMode: "demo" });
       useStore.getState().recomputeAllRecommendations();
       setDone(true);
     })();
+
     return () => {
       active = false;
+      if (saveTimer) clearTimeout(saveTimer);
+      cleanup?.();
     };
   }, []);
+
   return done;
 }
 

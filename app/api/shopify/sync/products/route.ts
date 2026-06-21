@@ -3,6 +3,8 @@ import { getShopifyConfig, shopifyGraphQL, ShopifyError } from "@/lib/shopify/cl
 import { PRODUCTS_QUERY } from "@/lib/shopify/queries";
 import { normalizeGraphProduct } from "@/lib/shopify/normalize";
 import type { ShopifyGraphProduct } from "@/lib/shopify/types";
+import { isDbConfigured } from "@/lib/db/prisma";
+import { ensureShop, recordRun } from "@/lib/store/syncDb";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +24,19 @@ async function syncProducts() {
       { first: MAX_PRODUCTS },
     );
     const products = data.products.edges.map((e) => normalizeGraphProduct(e.node));
+
+    let persisted = false;
+    if (isDbConfigured()) {
+      const shopId = await ensureShop(cfg.shop, cfg.apiVersion);
+      // Product rows are not modelled (no Product table); we log the run + count.
+      await recordRun({ shopId, resource: "products", imported: products.length, updated: 0, total: products.length });
+      persisted = true;
+    }
+
     return NextResponse.json({
       ok: true,
       configured: true,
+      persisted,
       count: products.length,
       products,
       shopDomain: cfg.shop,

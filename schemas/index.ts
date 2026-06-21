@@ -134,6 +134,10 @@ export const shopifyOrderPayloadSchema = z.object({
   currency: z.string(),
   total_price: z.string(),
   created_at: z.string().default(() => new Date().toISOString()),
+  financial_status: z.string().optional(),
+  fulfillment_status: z.string().nullable().optional(),
+  tags: z.string().optional(),
+  note: z.string().nullable().optional(),
   customer: z
     .object({
       first_name: z.string().optional(),
